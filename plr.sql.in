@@ -1,0 +1,9 @@
+SET autocommit TO 'on';
+
+CREATE FUNCTION plr_call_handler()
+RETURNS LANGUAGE_HANDLER
+AS 'MODULE_PATHNAME' LANGUAGE C;
+
+CREATE LANGUAGE plr HANDLER plr_call_handler;
+
+
