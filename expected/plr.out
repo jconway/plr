@@ -3,11 +3,32 @@
 -- does not depend on contents of plr.sql.
 --
 \set ECHO none
+ conditional_create_proc 
+-------------------------
+ OK
+(1 row)
+
+ conditional_create_proc 
+-------------------------
+ OK
+(1 row)
+
+ conditional_create_proc 
+-------------------------
+ OK
+(1 row)
+
 CREATE TABLE plr_modules (
   modseq int4,
   modsrc text
 );
 INSERT INTO plr_modules VALUES (0, 'pg.test.module.load <-function(msg) {print(msg)}');
+select reload_plr_modules();
+ reload_plr_modules 
+--------------------
+ OK
+(1 row)
+
 --
 -- plr_modules test
 --

@@ -34,6 +34,26 @@
 
 static ArrayType *array_create(FunctionCallInfo fcinfo, int numelems, int elem_start);
 
+/*-----------------------------------------------------------------------------
+ * reload_modules :
+ *		interface to allow plr_modules to be reloaded on demand
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(reload_plr_modules);
+Datum
+reload_plr_modules(PG_FUNCTION_ARGS)
+{
+	/* Connect to SPI manager */
+	if (SPI_connect() != SPI_OK_CONNECT)
+		elog(ERROR, "plr: cannot connect to SPI manager");
+
+	plr_init_load_modules(CurrentMemoryContext);
+
+	if (SPI_finish() != SPI_OK_FINISH)
+		elog(ERROR, "reload_plr_modules: SPI_finish() failed");
+
+	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
+}
 
 /*-----------------------------------------------------------------------------
  * install_rcmd :
@@ -85,20 +105,9 @@ array_push(PG_FUNCTION_ARGS)
 	int			indx;
 	bool		isNull;
 	Oid			element_type;
-	int			typlen;
+	int16		typlen;
 	bool		typbyval;
-	char		typdelim;
-	Oid			typinput,
-				typelem;
 	char		typalign;
-
-	/* return NULL if first argument is NULL */
-	if (PG_ARGISNULL(0))
-		PG_RETURN_NULL();
-
-	/* return the first argument if the second is NULL */
-	if (PG_ARGISNULL(1))
-		PG_RETURN_ARRAYTYPE_P(PG_GETARG_ARRAYTYPE_P_COPY(0));
 
 	v = PG_GETARG_ARRAYTYPE_P(0);
 	newelem = PG_GETARG_DATUM(1);
@@ -117,8 +126,7 @@ array_push(PG_FUNCTION_ARGS)
 	if (element_type == 0)
 		elog(ERROR, "array_push: invalid array element type");
 
-	system_cache_lookup(element_type, true, &typlen, &typbyval,
-						&typdelim, &typelem, &typinput, &typalign);
+	get_typlenbyvalalign(element_type, &typlen, &typbyval, &typalign);
 
 	result = array_set(v, 1, &indx, newelem, -1,
 						typlen, typbyval, typalign, &isNull);
@@ -177,12 +185,10 @@ array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
 {
 	Oid			funcid = fcinfo->flinfo->fn_oid;
 	Datum	   *dvalues = (Datum *) palloc(numelems * sizeof(Datum));
-	int			typlen;
+	int16		typlen;
 	bool		typbyval;
-	char		typdelim;
-	Oid			typinput,
-				typelem,
-				element_type;
+	Oid			typinput;
+	Oid			element_type;
 	char		typalign;
 	int			i;
 	HeapTuple	tp;
@@ -205,8 +211,7 @@ array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
 	functypeid = ((Form_pg_proc) GETSTRUCT(tp))->prorettype;
 	getTypeInputInfo(functypeid, &typinput, &element_type);
 
-	system_cache_lookup(element_type, true, &typlen, &typbyval,
-						&typdelim, &typelem, &typinput, &typalign);
+	get_typlenbyvalalign(element_type, &typlen, &typbyval, &typalign);
 
 	funcargtypes = ((Form_pg_proc) GETSTRUCT(tp))->proargtypes;
 

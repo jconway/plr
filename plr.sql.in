@@ -6,25 +6,46 @@ AS 'MODULE_PATHNAME' LANGUAGE C;
 
 CREATE LANGUAGE plr HANDLER plr_call_handler;
 
+CREATE OR REPLACE FUNCTION reload_plr_modules ()
+RETURNS text
+AS 'MODULE_PATHNAME','reload_plr_modules'
+LANGUAGE 'C';
+
 CREATE OR REPLACE FUNCTION install_rcmd (text)
 RETURNS text
 AS 'MODULE_PATHNAME','install_rcmd'
 LANGUAGE 'C' WITH (isstrict);
 
+CREATE OR REPLACE FUNCTION conditional_create_proc (text, text) RETURNS text AS '
+  sql <- paste("select 1 from pg_catalog.pg_proc where proname = ''", arg1, "''", sep="");
+  df <- pg.spi.exec(sql);
+  if (length(df) > 0)
+    return("OK");
+
+  df <- pg.spi.exec(arg2);
+  return("OK");
+' LANGUAGE 'plr' WITH (isstrict);
+
+SELECT conditional_create_proc ('singleton_array', '
 CREATE OR REPLACE FUNCTION array (float8)
 RETURNS float8[]
-AS 'MODULE_PATHNAME','array'
-LANGUAGE 'C' WITH (isstrict);
+AS ''MODULE_PATHNAME'',''array''
+LANGUAGE ''C'' WITH (isstrict);
+');
 
+SELECT conditional_create_proc ('array_push', '
 CREATE OR REPLACE FUNCTION array_push (_float8, float8)
 RETURNS float8[]
-AS 'MODULE_PATHNAME','array_push'
-LANGUAGE 'C';
+AS ''MODULE_PATHNAME'',''array_push''
+LANGUAGE ''C'' WITH (isstrict);
+');
 
+SELECT conditional_create_proc ('array_accum', '
 CREATE OR REPLACE FUNCTION array_accum (_float8, float8)
 RETURNS float8[]
-AS 'MODULE_PATHNAME','array_accum'
-LANGUAGE 'C';
+AS ''MODULE_PATHNAME'',''array_accum''
+LANGUAGE ''C'';
+');
 
 CREATE TYPE r_typename AS (typename text, typeoid oid);
 CREATE OR REPLACE FUNCTION r_typenames()

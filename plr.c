@@ -200,7 +200,6 @@ typedef struct plr_hashent
  */
 static void plr_init_interp(Oid funcid);
 static void plr_init_all(Oid funcid);
-static void plr_init_load_modules(void);
 static HeapTuple plr_trigger_handler(PG_FUNCTION_ARGS);
 static Datum plr_func_handler(PG_FUNCTION_ARGS);
 static plr_proc_desc *compile_plr_function(Oid fn_oid, bool is_trigger);
@@ -363,21 +362,27 @@ plr_init_interp(Oid funcid)
 	/*
 	 * Try to load procedures from plr_modules
 	 */
-	plr_init_load_modules();
+	plr_init_load_modules(plr_SPI_context);
 }
 
 /*
  * plr_init_load_modules() - Load procedures from
  *				  table plr_modules (if it exists)
+ *
+ * The caller is responsible to ensure SPI has already been connected
  */
-static void
-plr_init_load_modules(void)
+void
+plr_init_load_modules(MemoryContext	plr_SPI_context)
 {
 	int				spi_rc;
 	char		   *cmd;
 	int				i;
 	int				fno;
 	MemoryContext	oldcontext;
+
+	/* start EmbeddedR if not already done */
+	if (plr_interp_started == false)
+		start_interp();
 
 	/* switch to SPI memory context */
 	oldcontext = MemoryContextSwitchTo(plr_SPI_context);

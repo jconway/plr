@@ -11,6 +11,7 @@ CREATE TABLE plr_modules (
   modsrc text
 );
 INSERT INTO plr_modules VALUES (0, 'pg.test.module.load <-function(msg) {print(msg)}');
+select reload_plr_modules();
 
 --
 -- plr_modules test

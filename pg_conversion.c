@@ -35,6 +35,7 @@
 #include "plr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "catalog/catversion.h"
 
 static void pg_get_one_r(char *value, Oid arg_out_fn_oid, SEXP *obj, int elnum);
 static SEXP get_r_vector(Oid typtype, int numels);
@@ -58,6 +59,49 @@ static Tuplestorestate *get_generic_tuplestore(SEXP rval,
 											 AttInMetadata *attinmeta,
 											 MemoryContext per_query_ctx,
 											 bool retset);
+
+/*
+ * check bogus catalog version 9200303091 (i.e. not 200303091) until
+ * first CATALOG_VERSION_NO bump after construct_md_array gets committed
+ */
+#if (CATALOG_VERSION_NO < 200303091)
+static ArrayType *
+construct_md_array(Datum *elems,
+				   int ndims,
+				   int *dims,
+				   int *lbs,
+				   Oid elmtype, int elmlen, bool elmbyval, char elmalign)
+{
+	int			ndatabytes;
+	int			nbytes;
+	ArrayType  *array = NULL;
+	ArrayType  *tmparray = NULL;
+	int			nelems = ArrayGetNItems(ndims, dims);
+
+	/* build up 1d array */
+	tmparray = construct_array(elems, nelems, elmtype, elmlen, elmbyval, elmalign);
+
+	if (tmparray != NULL)
+	{
+		/* convert it to a ndims-array */
+		ndatabytes = ARR_SIZE(tmparray) - ARR_OVERHEAD(1);
+		nbytes = ndatabytes + ARR_OVERHEAD(ndims);
+		array = (ArrayType *) palloc(nbytes);
+
+		array->size = nbytes;
+		array->ndim = ndims;
+		array->flags = 0;
+		array->elemtype = elmtype;
+		memcpy(ARR_DIMS(array), dims, ndims * sizeof(int));
+		memcpy(ARR_LBOUND(array), lbs, ndims * sizeof(int));
+		memcpy(ARR_DATA_PTR(array), ARR_DATA_PTR(tmparray), ndatabytes);
+
+		pfree(tmparray);
+	}
+
+	return array;
+}
+#endif /* CATALOG_VERSION_NO < 200303091 */
 
 /*
  * given a scalar pg value, convert to a one row R vector
@@ -593,9 +637,6 @@ get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
 	int			nr = 0;
 	int			nc = length(rval);
 	int			ndims = 2;
-	int			ndatabytes;
-	int			nbytes;
-	ArrayType  *tmparray;
 	int			dims[ndims];
 	int			lbs[ndims];
 	int			idx;
@@ -646,23 +687,10 @@ get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
 	lbs[0] = 1;
 	lbs[1] = 1;
 
-	/* build up 1d array */
-	array = construct_array(dvalues, nr * nc, result_elem, typlen, typbyval, typalign);
+	array = construct_md_array(dvalues, ndims, dims, lbs,
+								result_elem, typlen, typbyval, typalign);
 
-	/* convert it to a 2d array */
-	ndatabytes = ARR_SIZE(array) - ARR_OVERHEAD(1);
-	nbytes = ndatabytes + ARR_OVERHEAD(2);
-	tmparray = (ArrayType *) palloc(nbytes);
-
-	tmparray->size = nbytes;
-	tmparray->ndim = ndims;
-	tmparray->flags = 0;
-	tmparray->elemtype = result_elem;
-	memcpy(ARR_DIMS(tmparray), dims, ndims * sizeof(int));
-	memcpy(ARR_LBOUND(tmparray), lbs, ndims * sizeof(int));
-	memcpy(ARR_DATA_PTR(tmparray), ARR_DATA_PTR(array), ndatabytes);
-
-	dvalue = PointerGetDatum(tmparray);
+	dvalue = PointerGetDatum(array);
 
 	return dvalue;
 }
@@ -686,9 +714,6 @@ get_md_array_datum(SEXP rval, int ndims, plr_proc_desc *prodesc, bool *isnull)
 	int			nr = 1;
 	int			nc = 1;
 	int			nz = 1;
-	int			ndatabytes;
-	int			nbytes;
-	ArrayType  *tmparray;
 	int			dims[ndims];
 	int			lbs[ndims];
 	int			idx;
@@ -745,23 +770,10 @@ get_md_array_datum(SEXP rval, int ndims, plr_proc_desc *prodesc, bool *isnull)
 	}
 	UNPROTECT(1);
 
-	/* build up 1d array */
-	array = construct_array(dvalues, nitems, result_elem, typlen, typbyval, typalign);
+	array = construct_md_array(dvalues, ndims, dims, lbs,
+								result_elem, typlen, typbyval, typalign);
 
-	/* convert it to a {ndims}d array */
-	ndatabytes = ARR_SIZE(array) - ARR_OVERHEAD(1);
-	nbytes = ndatabytes + ARR_OVERHEAD(ndims);
-	tmparray = (ArrayType *) palloc(nbytes);
-
-	tmparray->size = nbytes;
-	tmparray->ndim = ndims;
-	tmparray->flags = 0;
-	tmparray->elemtype = result_elem;
-	memcpy(ARR_DIMS(tmparray), dims, ndims * sizeof(int));
-	memcpy(ARR_LBOUND(tmparray), lbs, ndims * sizeof(int));
-	memcpy(ARR_DATA_PTR(tmparray), ARR_DATA_PTR(array), ndatabytes);
-
-	dvalue = PointerGetDatum(tmparray);
+	dvalue = PointerGetDatum(array);
 
 	return dvalue;
 }
@@ -781,6 +793,9 @@ get_generic_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
 	int			i;
 	Datum	   *dvalues = NULL;
 	ArrayType  *array;
+	int			ndims = 1;
+	int			dims[ndims];
+	int			lbs[ndims];
 
 	dvalues = (Datum *) palloc(objlen * sizeof(Datum));
 	PROTECT(obj =  AS_CHARACTER(rval));
@@ -800,8 +815,11 @@ get_generic_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
     }
 	UNPROTECT(1);
 
-	/* build up array */
-	array = construct_array(dvalues, objlen, result_elem, typlen, typbyval, typalign);
+	dims[0] = objlen;
+	lbs[0] = 1;
+
+	array = construct_md_array(dvalues, ndims, dims, lbs,
+								result_elem, typlen, typbyval, typalign);
 
 	dvalue = PointerGetDatum(array);
 
