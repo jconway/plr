@@ -36,6 +36,8 @@
 /*
  * Global data
  */
+MemoryContext plr_SPI_context;
+
 static bool plr_firstcall = true;
 static bool	plr_interp_started = false;
 static FunctionCallInfo plr_current_fcinfo = NULL;
@@ -132,12 +134,12 @@ static HTAB *plr_HashTable;
 			"pg.reval <- function(arg1) {eval(parse(text = arg1))}"
 
 /* hash table support */
-#define plr_HashTableLookup(NAME, PRODESC) \
+#define plr_HashTableLookup(PRODESCNAME, PRODESC) \
 do { \
 	plr_HashEnt *hentry; char key[MAX_PRONAME_LEN]; \
 	\
 	MemSet(key, 0, MAX_PRONAME_LEN); \
-	snprintf(key, MAX_PRONAME_LEN - 1, "%s", NAME); \
+	snprintf(key, MAX_PRONAME_LEN - 1, "%s", PRODESCNAME); \
 	hentry = (plr_HashEnt*) hash_search(plr_HashTable, \
 										 key, HASH_FIND, NULL); \
 	if (hentry) \
@@ -161,12 +163,12 @@ do { \
 	hentry->prodesc = PRODESC; \
 } while(0)
 
-#define plr_HashTableDelete(PRODESC) \
+#define plr_HashTableDelete(PRODESCNAME) \
 do { \
 	plr_HashEnt *hentry; char key[MAX_PRONAME_LEN]; \
 	\
 	MemSet(key, 0, MAX_PRONAME_LEN); \
-	snprintf(key, MAX_PRONAME_LEN - 1, "%s", PRODESC->proname); \
+	snprintf(key, MAX_PRONAME_LEN - 1, "%s", PRODESCNAME); \
 	hentry = (plr_HashEnt*) hash_search(plr_HashTable, \
 										 key, HASH_REMOVE, NULL); \
 	if (hentry == NULL) \
@@ -208,22 +210,19 @@ PG_FUNCTION_INFO_V1(plr_call_handler);
 Datum
 plr_call_handler(PG_FUNCTION_ARGS)
 {
-	Datum		retval;
-	FunctionCallInfo save_fcinfo;
-
-	/* initialize R if needed */
-	if(plr_firstcall)
-		plr_init_all(fcinfo->flinfo->fn_oid);
+	Datum			retval;
+	MemoryContext	origcontext = CurrentMemoryContext;
 
 	/* Connect to SPI manager */
 	if (SPI_connect() != SPI_OK_CONNECT)
 		elog(ERROR, "plr: cannot connect to SPI manager");
 
-	/*
-	 * Determine if called as function or trigger and
-	 * call appropriate subhandler
-	 */
-	save_fcinfo = plr_current_fcinfo;
+	/* switch from SPI back to original call memory context */
+	plr_SPI_context = MemoryContextSwitchTo(origcontext);
+
+	/* initialize R if needed */
+	if(plr_firstcall)
+		plr_init_all(fcinfo->flinfo->fn_oid);
 
 	if (CALLED_AS_TRIGGER(fcinfo))
 	{
@@ -236,7 +235,11 @@ plr_call_handler(PG_FUNCTION_ARGS)
 		retval = plr_func_handler(fcinfo);
 	}
 
-	plr_current_fcinfo = save_fcinfo;
+	/* switch back to SPI memory context */
+	MemoryContextSwitchTo(plr_SPI_context);
+
+	if (SPI_finish() != SPI_OK_FINISH)
+		elog(ERROR, "plr: SPI_finish() failed");
 
 	return retval;
 }
@@ -341,12 +344,7 @@ plr_init_interp(Oid funcid)
 	/*
 	 * Try to load procedures from plr_modules
 	 */
-	if (SPI_connect() != SPI_OK_CONNECT)
-		elog(ERROR, "plr_init_interp: SPI_connect failed");
 	plr_init_load_modules();
-	if (SPI_finish() != SPI_OK_FINISH)
-		elog(ERROR, "plr_init_interp: SPI_finish failed");
-
 }
 
 /*
@@ -356,10 +354,14 @@ plr_init_interp(Oid funcid)
 static void
 plr_init_load_modules(void)
 {
-	int			spi_rc;
-	char	   *cmd;
-	int			i;
-	int			fno;
+	int				spi_rc;
+	char		   *cmd;
+	int				i;
+	int				fno;
+	MemoryContext	oldcontext;
+
+	/* switch to SPI memory context */
+	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
 
 	/*
 	 * Check if table plr_modules exists
@@ -404,12 +406,19 @@ plr_init_load_modules(void)
 		}
 	}
 	SPI_freetuptable(SPI_tuptable);
+
+	/* back to caller's memory context */
+	MemoryContextSwitchTo(oldcontext);
 }
 
 static void
 plr_init_all(Oid funcid)
 {
 	HASHCTL		ctl;
+	MemoryContext		oldcontext;
+
+	/* everything initialized needs to live until/unless we explicitly delete it */
+	oldcontext = MemoryContextSwitchTo(TopMemoryContext);
 
 	/* set up the functions caching hash table */
 	ctl.keysize = MAX_PRONAME_LEN;
@@ -425,6 +434,9 @@ plr_init_all(Oid funcid)
 	plr_init_interp(funcid);
 
 	plr_firstcall = false;
+
+	/* switch back to caller's context */
+	MemoryContextSwitchTo(oldcontext);
 }
 
 static HeapTuple
@@ -443,7 +455,6 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	SEXP			rargs;
 	SEXP			rvalue;
 	Datum			retval;
-	MemoryContext	oldcontext;
 
 	/* Find or compile the function */
 	prodesc = compile_plr_function(fcinfo->flinfo->fn_oid, false);
@@ -455,9 +466,6 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	/* Call the R function */
 	PROTECT(rvalue = call_r_func(fun, rargs));
 
-	/* switch out of current memory context into the function's context */
-	oldcontext = MemoryContextSwitchTo(fcinfo->flinfo->fn_mcxt);
-
 	/* convert the return value from an R object to a Datum */
 	if(rvalue != R_NilValue)
 		retval = r_get_pg(rvalue, prodesc, fcinfo);
@@ -468,12 +476,6 @@ plr_func_handler(PG_FUNCTION_ARGS)
 		fcinfo->isnull = true;
 	}
 	UNPROTECT(3);
-
-	/* switch back to old memory context */
-	MemoryContextSwitchTo(oldcontext);
-
-	if (SPI_finish() != SPI_OK_FINISH)
-		elog(ERROR, "plr: SPI_finish() failed");
 
 	return retval;
 }
@@ -500,7 +502,7 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 	procStruct = (Form_pg_proc) GETSTRUCT(procTup);
 
 	/* grab the function name */
-	proname = pstrdup(NameStr(procStruct->proname));
+	proname = NameStr(procStruct->proname);
 
 	/* Build our internal proc name from the functions Oid */
 	sprintf(internal_proname, "PLR%u", fn_oid);
@@ -522,8 +524,13 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 
 		if (!uptodate)
 		{
-			plr_HashTableDelete(prodesc);
-			prodesc = NULL;
+			/* delete the hash table entry */
+			plr_HashTableDelete(prodesc->proname);
+
+			/* clear out prodesc */
+			xpfree(prodesc->proname);
+			R_ReleaseObject(prodesc->fun);
+			xpfree(prodesc);
 		}
 	}
 
@@ -544,13 +551,18 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 		StringInfo			proc_internal_def = makeStringInfo();
 		StringInfo			proc_internal_args = makeStringInfo();
 		char		 	   *proc_source;
+		MemoryContext		oldcontext;
+
+		/* the prodesc structure needs to live until we explicitly delete it */
+		oldcontext = MemoryContextSwitchTo(TopMemoryContext);
 
 		/* Allocate a new procedure description block */
-		prodesc = (plr_proc_desc *) malloc(sizeof(plr_proc_desc));
+		prodesc = (plr_proc_desc *) palloc(sizeof(plr_proc_desc));
 		if (prodesc == NULL)
 			elog(ERROR, "plr: out of memory");
 		MemSet(prodesc, 0, sizeof(plr_proc_desc));
-		prodesc->proname = strdup(internal_proname);
+
+		prodesc->proname = pstrdup(internal_proname);
 		prodesc->fn_xmin = HeapTupleHeaderGetXmin(procTup->t_data);
 		prodesc->fn_cmin = HeapTupleHeaderGetCmin(procTup->t_data);
 
@@ -560,8 +572,8 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 								 0, 0, 0);
 		if (!HeapTupleIsValid(langTup))
 		{
-			free(prodesc->proname);
-			free(prodesc);
+			xpfree(prodesc->proname);
+			xpfree(prodesc);
 			elog(ERROR, "plr: cache lookup for language %u failed",
 				 procStruct->prolang);
 		}
@@ -580,8 +592,8 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 									 0, 0, 0);
 			if (!HeapTupleIsValid(typeTup))
 			{
-				free(prodesc->proname);
-				free(prodesc);
+				xpfree(prodesc->proname);
+				xpfree(prodesc);
 				elog(ERROR, "plr: cache lookup for return type %u failed",
 					 procStruct->prorettype);
 			}
@@ -595,16 +607,16 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 					 /* okay */ ;
 				else if (procStruct->prorettype == TRIGGEROID)
 				{
-					free(prodesc->proname);
-					free(prodesc);
+					xpfree(prodesc->proname);
+					xpfree(prodesc);
 					elog(ERROR, "plr functions cannot return type %s"
 						 "\n\texcept when used as triggers",
 						 format_type_be(procStruct->prorettype));
 				}
 				else
 				{
-					free(prodesc->proname);
-					free(prodesc);
+					xpfree(prodesc->proname);
+					xpfree(prodesc);
 					elog(ERROR, "plr functions cannot return type %s",
 						 format_type_be(procStruct->prorettype));
 				}
@@ -664,8 +676,8 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 										 0, 0, 0);
 				if (!HeapTupleIsValid(typeTup))
 				{
-					free(prodesc->proname);
-					free(prodesc);
+					xpfree(prodesc->proname);
+					xpfree(prodesc);
 					elog(ERROR, "plr: cache lookup for argument type %u failed",
 						 procStruct->proargtypes[i]);
 				}
@@ -674,8 +686,8 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 				/* Disallow pseudotype argument */
 				if (typeStruct->typtype == 'p')
 				{
-					free(prodesc->proname);
-					free(prodesc);
+					xpfree(prodesc->proname);
+					xpfree(prodesc);
 					elog(ERROR, "plr functions cannot take type %s",
 						 format_type_be(procStruct->proargtypes[i]));
 				}
@@ -750,20 +762,25 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 		else
 			prodesc->fun = Rf_findFun(Rf_install(proname), R_GlobalEnv);
 
+		R_PreserveObject(prodesc->fun);
+
 		pfree(proc_source);
 		freeStringInfo(proc_internal_def);
 
 		/* test that this is really a function. */
 		if(prodesc->fun == R_NilValue)
 		{
-			free(prodesc->proname);
-			free(prodesc);
+			xpfree(prodesc->proname);
+			xpfree(prodesc);
 			elog(ERROR, "plr: cannot create internal procedure %s",
 				 internal_proname);
 		}
 
 		/* Add the proc description block to the hashtable */
 		plr_HashTableInsert(prodesc);
+
+		/* switch back to the context we were called with */
+		MemoryContextSwitchTo(oldcontext);
 	}
 
 	ReleaseSysCache(procTup);

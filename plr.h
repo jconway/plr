@@ -140,7 +140,6 @@ typedef struct plr_proc_desc
 	char		arg_elem_typalign[FUNC_MAX_ARGS];
 	int			arg_is_rel[FUNC_MAX_ARGS];
 	SEXP		fun;	/* compiled R function */
-	SEXP		args;	/* converted args */
 }	plr_proc_desc;
 
 
@@ -185,6 +184,13 @@ extern void system_cache_lookup(Oid element_type, bool input, int *typlen,
 					bool *typbyval, char *typdelim, Oid *typelem,
 					Oid *proc, char *typalign);
 extern Oid get_typelem(Oid element_type);
+
+
+/*
+ * See the no-exported header file ${R_HOME}/src/include/Defn.h
+ */
+extern void R_PreserveObject(SEXP);
+extern void R_ReleaseObject(SEXP);
 
 /*
  * See the no-exported header file ${R_HOME}/src/include/Parse.h

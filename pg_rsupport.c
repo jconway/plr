@@ -33,6 +33,8 @@
  */
 #include "plr.h"
 
+extern MemoryContext plr_SPI_context;
+
 static SEXP rpgsql_get_results(int ntuples, SPITupleTable *tuptable);
 
 /* The information we cache prepared plans */
@@ -122,14 +124,21 @@ plr_SPI_exec(SEXP rsql)
 	int				count = 0;
 	int				ntuples;
 	SEXP			result = NULL;
+	MemoryContext	oldcontext;
 
 	PROTECT(rsql =  AS_CHARACTER(rsql));
 	sql = CHAR(STRING_ELT(rsql, 0));
 	if (sql == NULL)
 		elog(ERROR, "plr: cannot exec empty query");
 
+	/* switch to SPI memory context */
+	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+
 	/* Execute the query and handle return codes */
 	spi_rc = SPI_exec(sql, count);
+
+	/* back to caller's memory context */
+	MemoryContextSwitchTo(oldcontext);
 
 	switch (spi_rc)
 	{
@@ -289,6 +298,9 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 		}
 	}
 
+	/* switch to SPI memory context */
+	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+
 	/* Prepare plan for query */
 	pplan = SPI_prepare(sql, nargs, typeids);
 
@@ -362,6 +374,9 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 		elog(ERROR, "plr: SPI_saveplan failed - %s", reason);
 	}
 
+	/* back to caller's memory context */
+	MemoryContextSwitchTo(oldcontext);
+
 	/* no longer need this */
 	SPI_freeplan(pplan);
 
@@ -397,6 +412,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	int					count = 0;
 	int					ntuples;
 	SEXP				result;
+	MemoryContext		oldcontext;
 
 	if (!IS_LIST(rargvalues))
 		elog(ERROR, "plr: second parameter must be a list of arguments to the prepared plan");
@@ -423,8 +439,14 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 		UNPROTECT(1);
 	}
 
+	/* switch to SPI memory context */
+	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+
 	/* Execute the plan */
 	spi_rc = SPI_execp(saved_plan, argvalues, nulls, count);
+
+	/* back to caller's memory context */
+	MemoryContextSwitchTo(oldcontext);
 
 	/* check the result */
 	switch (spi_rc)
