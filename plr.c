@@ -272,11 +272,17 @@ load_r_cmd(const char *cmd)
 	PROTECT(cmdexpr = R_ParseVector(cmdSexp, -1, &status));
 	if (status != PARSE_OK) {
 	    UNPROTECT(2);
-	    error("plr: invalid R call: %s", cmd);
+	    elog(ERROR, "plr: invalid R call: %s", cmd);
 	}
+
 	/* Loop is needed here as EXPSEXP may be of length > 1 */
 	for(i = 0; i < length(cmdexpr); i++)
-	    ans = eval(VECTOR_ELT(cmdexpr, i), R_GlobalEnv);
+	{
+		ans = R_tryEval(VECTOR_ELT(cmdexpr, i), R_GlobalEnv, &status);
+		if(status != 0)
+			elog(ERROR, "Caught an error calling R function");
+	}
+
 	UNPROTECT(2);
 }
 

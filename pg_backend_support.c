@@ -182,7 +182,7 @@ void
 perm_fmgr_info(Oid functionId, FmgrInfo *finfo)
 {
 	fmgr_info_cxt(functionId, finfo, TopMemoryContext);
-	finfo->fn_mcxt = QueryContext;
+	finfo->fn_mcxt = thisQueryContext;
 	finfo->fn_expr = (Node *) NULL;
 }
 

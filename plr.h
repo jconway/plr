@@ -194,7 +194,7 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 	} while (0)
 
 #define CHECK_POLYMORPHIC_TYPES
-
+#define thisQueryContext	QueryContext
 
 #else
 /*************************************************************************
@@ -250,6 +250,11 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 			} \
 		} \
 	} while (0)
+
+#define thisQueryContext        MessageContext
+#undef thisQueryContext /* temporary until Tom's mcxt changes are committed */
+#define thisQueryContext        QueryContext
+
 
 #endif /* PG_VERSION_73_COMPAT */
 
