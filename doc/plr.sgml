@@ -59,6 +59,11 @@
    PL/R should build cleanly with PostgreSQL 7.3.x. It was developed using libR
    from R 1.6.2 under Red Hat 7.3 & 8.0.
    </para>
+
+   <para>
+   PL/R has also passed its regression test with PostgreSQL 7.4devel and
+   R 1.7devel under Red Hat 7.3 & 8.0.
+   </para>
   </note>
 
   <para>
