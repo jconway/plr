@@ -156,14 +156,17 @@ select test_dta2();
 create or replace function test_dia1() returns int[] as 'as.data.frame(array(letters[1:10], c(2,5)))' language 'plr';
 select test_dia1() as error;
 
-create or replace function test_dtup() returns record as 'data.frame(letters[1:10],1:10)' language 'plr';
+create or replace function test_dtup() returns setof record as 'data.frame(letters[1:10],1:10)' language 'plr';
 select * from test_dtup() as t(f1 text, f2 int);
 
-create or replace function test_mtup() returns record as 'as.matrix(array(1:15,c(5,3)))' language 'plr';
+create or replace function test_mtup() returns setof record as 'as.matrix(array(1:15,c(5,3)))' language 'plr';
 select * from test_mtup() as t(f1 int, f2 int, f3 int);
 
-create or replace function test_vtup() returns record as 'as.vector(array(1:15,c(5,3)))' language 'plr';
+create or replace function test_vtup() returns setof record as 'as.vector(array(1:15,c(5,3)))' language 'plr';
 select * from test_vtup() as t(f1 int);
+
+create or replace function test_vint() returns setof int as 'as.vector(array(1:15,c(5,3)))' language 'plr';
+select * from test_vint();
 
 --
 -- try again with named tuple types
@@ -172,13 +175,13 @@ CREATE TYPE dtup AS (f1 text, f2 int);
 CREATE TYPE mtup AS (f1 int, f2 int, f3 int);
 CREATE TYPE vtup AS (f1 int);
 
-create or replace function test_dtup1() returns dtup as 'data.frame(letters[1:10],1:10)' language 'plr';
+create or replace function test_dtup1() returns setof dtup as 'data.frame(letters[1:10],1:10)' language 'plr';
 select * from test_dtup1();
 
-create or replace function test_mtup1() returns mtup as 'as.matrix(array(1:15,c(5,3)))' language 'plr';
+create or replace function test_mtup1() returns setof mtup as 'as.matrix(array(1:15,c(5,3)))' language 'plr';
 select * from test_mtup1();
 
-create or replace function test_vtup1() returns vtup as 'as.vector(array(1:15,c(5,3)))' language 'plr';
+create or replace function test_vtup1() returns setof vtup as 'as.vector(array(1:15,c(5,3)))' language 'plr';
 select * from test_vtup1();
 
 
@@ -198,7 +201,7 @@ select test_spi_t('select oid, typname from pg_type where typname = ''oid'' or t
 create or replace function test_spi_ta(text) returns text[] as 'pg.spi.exec(arg1)' language 'plr';
 select test_spi_ta('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''');
 
-create or replace function test_spi_tup(text) returns record as 'pg.spi.exec(arg1)' language 'plr';
+create or replace function test_spi_tup(text) returns setof record as 'pg.spi.exec(arg1)' language 'plr';
 select * from test_spi_tup('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''') as t(typeid oid, typename name);
 
 create or replace function fetch_pgoid(text) returns int as 'pg.reval(arg1)' language 'plr';
@@ -207,7 +210,7 @@ select fetch_pgoid('BYTEAOID');
 create or replace function test_spi_prep(text) returns text as 'sp <<- pg.spi.prepare(arg1, c(NAMEOID, NAMEOID)); print("OK")' language 'plr';
 select test_spi_prep('select oid, typname from pg_type where typname = $1 or typname = $2');
 
-create or replace function test_spi_execp(text, text, text) returns record as 'pg.spi.execp(pg.reval(arg1), list(arg2,arg3))' language 'plr';
+create or replace function test_spi_execp(text, text, text) returns setof record as 'pg.spi.execp(pg.reval(arg1), list(arg2,arg3))' language 'plr';
 select * from test_spi_execp('sp','oid','text') as t(typeid oid, typename name);
 
 create or replace function test_spi_lastoid(text) returns text as 'pg.spi.exec(arg1); pg.spi.lastoid()/pg.spi.lastoid()' language 'plr';
@@ -235,5 +238,5 @@ select * from test_foo(get_foo(1));
 --
 -- test 2D array argument
 --
-create or replace function test_in_m_tup(_int4) returns record as 'arg1' language 'plr';
+create or replace function test_in_m_tup(_int4) returns setof record as 'arg1' language 'plr';
 select * from test_in_m_tup('{{1,3,5},{2,4,6}}') as t(f1 int, f2 int, f3 int);

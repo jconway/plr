@@ -46,15 +46,18 @@ static Datum get_generic_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *is
 static Tuplestorestate *get_frame_tuplestore(SEXP rval,
 											 plr_proc_desc *prodesc,
 											 AttInMetadata *attinmeta,
-											 MemoryContext per_query_ctx);
+											 MemoryContext per_query_ctx,
+											 bool retset);
 static Tuplestorestate *get_matrix_tuplestore(SEXP rval,
 											 plr_proc_desc *prodesc,
 											 AttInMetadata *attinmeta,
-											 MemoryContext per_query_ctx);
+											 MemoryContext per_query_ctx,
+											 bool retset);
 static Tuplestorestate *get_generic_tuplestore(SEXP rval,
 											 plr_proc_desc *prodesc,
 											 AttInMetadata *attinmeta,
-											 MemoryContext per_query_ctx);
+											 MemoryContext per_query_ctx,
+											 bool retset);
 
 /*
  * given a scalar pg value, convert to a one row R vector
@@ -421,7 +424,7 @@ r_get_pg(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 	bool	isnull = false;
 	Datum	result;
 
-	if (prodesc->result_istuple)
+	if (prodesc->result_istuple || fcinfo->flinfo->fn_retset)
 		result = get_tuplestore(rval, prodesc, fcinfo, &isnull);
 	else
 	{
@@ -438,6 +441,7 @@ r_get_pg(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 			result = get_scalar_datum(rval, prodesc->result_in_func, prodesc->result_elem, &isnull);
 		else
 			result = get_array_datum(rval, prodesc, &isnull);
+
 	}
 
 	if (isnull)
@@ -449,6 +453,7 @@ r_get_pg(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 static Datum
 get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo, bool *isnull)
 {
+	bool			retset = fcinfo->flinfo->fn_retset;
 	ReturnSetInfo  *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	TupleDesc		tupdesc;
 	AttInMetadata  *attinmeta;
@@ -457,7 +462,7 @@ get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo, bool 
 	int				nc;
 
 	/* check to see if caller supports us returning a tuplestore */
-	if (!rsinfo || (!rsinfo->allowedModes & SFRM_Materialize))
+	if (!rsinfo || !(rsinfo->allowedModes & SFRM_Materialize))
 		elog(ERROR, "plr: Materialize mode required, but it is not "
 			 "allowed in this context");
 
@@ -492,11 +497,11 @@ get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo, bool 
 	rsinfo->returnMode = SFRM_Materialize;
 
 	if (isFrame(rval))
-		rsinfo->setResult = get_frame_tuplestore(rval, prodesc, attinmeta, per_query_ctx);
+		rsinfo->setResult = get_frame_tuplestore(rval, prodesc, attinmeta, per_query_ctx, retset);
 	else if (isMatrix(rval))
-		rsinfo->setResult = get_matrix_tuplestore(rval, prodesc, attinmeta, per_query_ctx);
+		rsinfo->setResult = get_matrix_tuplestore(rval, prodesc, attinmeta, per_query_ctx, retset);
 	else
-		rsinfo->setResult = get_generic_tuplestore(rval, prodesc, attinmeta, per_query_ctx);
+		rsinfo->setResult = get_generic_tuplestore(rval, prodesc, attinmeta, per_query_ctx, retset);
 
 	/*
 	 * SFRM_Materialize mode expects us to return a NULL Datum. The actual
@@ -767,7 +772,8 @@ static Tuplestorestate *
 get_frame_tuplestore(SEXP rval,
 					 plr_proc_desc *prodesc,
 					 AttInMetadata *attinmeta,
-					 MemoryContext per_query_ctx)
+					 MemoryContext per_query_ctx,
+					 bool retset)
 {
 	Tuplestorestate	   *tupstore;
 	char			  **values;
@@ -787,10 +793,18 @@ get_frame_tuplestore(SEXP rval,
 
 	MemoryContextSwitchTo(oldcontext);
 
-	/* get number of rows by examining the first column */
-	PROTECT(dfcol = VECTOR_ELT(rval, 0));
-	nr = length(dfcol);
-	UNPROTECT(1);
+	/*
+	 * If we return a set, get number of rows by examining the first column.
+	 * Otherwise, stop at one row.
+	 */
+	if (retset)
+	{
+		PROTECT(dfcol = VECTOR_ELT(rval, 0));
+		nr = length(dfcol);
+		UNPROTECT(1);
+	}
+	else
+		nr = 1;
 
 	/* coerce columns to character in advance */
 	PROTECT(result = NEW_LIST(nc));
@@ -890,7 +904,8 @@ static Tuplestorestate *
 get_matrix_tuplestore(SEXP rval,
 					 plr_proc_desc *prodesc,
 					 AttInMetadata *attinmeta,
-					 MemoryContext per_query_ctx)
+					 MemoryContext per_query_ctx,
+					 bool retset)
 {
 	Tuplestorestate	   *tupstore;
 	char			  **values;
@@ -898,11 +913,20 @@ get_matrix_tuplestore(SEXP rval,
 	MemoryContext		oldcontext;
 	SEXP				obj;
 	int					i, j;
-	int					nr = nrows(rval);
+	int					nr;
 	int					nc = ncols(rval);
 
 	/* switch to appropriate context to create the tuple store */
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	/*
+	 * If we return a set, get number of rows.
+	 * Otherwise, stop at one row.
+	 */
+	if (retset)
+		nr = nrows(rval);
+	else
+		nr = 1;
 
 	/* initialize our tuplestore */
 	tupstore = tuplestore_begin_heap(true, SortMem);
@@ -942,19 +966,29 @@ static Tuplestorestate *
 get_generic_tuplestore(SEXP rval,
 					 plr_proc_desc *prodesc,
 					 AttInMetadata *attinmeta,
-					 MemoryContext per_query_ctx)
+					 MemoryContext per_query_ctx,
+					 bool retset)
 {
 	Tuplestorestate	   *tupstore;
 	char			  **values;
 	HeapTuple			tuple;
 	MemoryContext		oldcontext;
-	int					nr = length(rval);
+	int					nr;
 	int					nc = 1;
 	SEXP				obj;
 	int					i;
 
 	/* switch to appropriate context to create the tuple store */
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	/*
+	 * If we return a set, get number of rows.
+	 * Otherwise, stop at one row.
+	 */
+	if (retset)
+		nr = length(rval);
+	else
+		nr = 1;
 
 	/* initialize our tuplestore */
 	tupstore = tuplestore_begin_heap(true, SortMem);
