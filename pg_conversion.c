@@ -533,23 +533,42 @@ get_array_datum(SEXP rval, plr_function *function, bool *isnull)
 {
 	SEXP	rdims;
 	int		ndims;
+	int		objlen = length(rval);
 
-	/* two supported special cases */
-	if (isFrame(rval))
-		return get_frame_array_datum(rval, function, isnull);
-	else if (isMatrix(rval))
-		return get_md_array_datum(rval, 2 /* matrix is 2D */, function, isnull);
+	if (objlen > 0)
+	{
+		/* two supported special cases */
+		if (isFrame(rval))
+			return get_frame_array_datum(rval, function, isnull);
+		else if (isMatrix(rval))
+			return get_md_array_datum(rval, 2 /* matrix is 2D */, function, isnull);
 
-	PROTECT(rdims = getAttrib(rval, R_DimSymbol));
-	ndims = length(rdims);
-	UNPROTECT(1);
+		PROTECT(rdims = getAttrib(rval, R_DimSymbol));
+		ndims = length(rdims);
+		UNPROTECT(1);
 
-	/* 2D and 3D arrays are specifically supported too */
-	if (ndims == 2 || ndims == 3)
-		return get_md_array_datum(rval, ndims, function, isnull);
+		/* 2D and 3D arrays are specifically supported too */
+		if (ndims == 2 || ndims == 3)
+			return get_md_array_datum(rval, ndims, function, isnull);
 
-	/* everything else */
-	return get_generic_array_datum(rval, function, isnull);
+		/* everything else */
+		return get_generic_array_datum(rval, function, isnull);
+	}
+	else
+	{
+		/* create an empty array */
+		ArrayType  *array;
+		int			nbytes = ARR_OVERHEAD(0);
+		Oid			result_elem = function->result_elem;
+
+		array = (ArrayType *) palloc(nbytes);
+		array->size = nbytes;
+		array->ndim = 0;
+		array->flags = 0;
+		array->elemtype = result_elem;
+
+		return PointerGetDatum(array);
+	}
 }
 
 static Datum
@@ -729,43 +748,29 @@ get_generic_array_datum(SEXP rval, plr_function *function, bool *isnull)
 	int			dims[ndims];
 	int			lbs[ndims];
 
-	if (objlen > 0)
+	dvalues = (Datum *) palloc(objlen * sizeof(Datum));
+	PROTECT(obj =  AS_CHARACTER(rval));
+
+	/* Loop is needed here as result value might be of length > 1 */
+	for(i = 0; i < objlen; i++)
 	{
-		dvalues = (Datum *) palloc(objlen * sizeof(Datum));
-		PROTECT(obj =  AS_CHARACTER(rval));
+		value = CHAR(STRING_ELT(obj, i));
 
-		/* Loop is needed here as result value might be of length > 1 */
-		for(i = 0; i < objlen; i++)
-		{
-			value = CHAR(STRING_ELT(obj, i));
+		if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
+			elog(ERROR, "plr: cannot return array with NULL elements");
+		else
+			dvalues[i] = FunctionCall3(&in_func,
+									CStringGetDatum(value),
+									(Datum) 0,
+									Int32GetDatum(-1));
+    }
+	UNPROTECT(1);
 
-			if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
-				elog(ERROR, "plr: cannot return array with NULL elements");
-			else
-				dvalues[i] = FunctionCall3(&in_func,
-										CStringGetDatum(value),
-										(Datum) 0,
-										Int32GetDatum(-1));
-	    }
-		UNPROTECT(1);
+	dims[0] = objlen;
+	lbs[0] = 1;
 
-		dims[0] = objlen;
-		lbs[0] = 1;
-
-		array = construct_md_array(dvalues, ndims, dims, lbs,
-									result_elem, typlen, typbyval, typalign);
-	}
-	else
-	{
-		/* create an empty array */
-		int		nbytes = ARR_OVERHEAD(0);
-
-		array = (ArrayType *) palloc(nbytes);
-		array->size = nbytes;
-		array->ndim = 0;
-		array->flags = 0;
-		array->elemtype = result_elem;
-	}
+	array = construct_md_array(dvalues, ndims, dims, lbs,
+								result_elem, typlen, typbyval, typalign);
 
 	dvalue = PointerGetDatum(array);
 
