@@ -1438,14 +1438,13 @@ send_message_to_server_log(ErrorData *edata)
 static void
 send_message_to_frontend(ErrorData *edata)
 {
+	/* Old style --- gin up a backwards-compatible message */
+	StringInfoData buf;
 	StringInfoData msgbuf;
 
 	/* 'N' (Notice) is for nonfatal conditions, 'E' is for errors */
 	pq_beginmessage(&msgbuf);
 	pq_sendbyte(&msgbuf, edata->elevel != ERROR ? 'N' : 'E');
-
-	/* Old style --- gin up a backwards-compatible message */
-	StringInfoData buf;
 
 	initStringInfo(&buf);
 
