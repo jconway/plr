@@ -23,10 +23,10 @@ override CPPFLAGS += -DPKGLIBDIR=\"$(pkglibdir)\" -DDLSUFFIX=\"$(DLSUFFIX)\"
 rpath :=
 
 MODULE_big	:= plr
-PG_CPPFLAGS	:= -I$(r_includespec)
+PG_CPPFLAGS	+= -I$(r_includespec)
 SRCS		+= plr.c pg_conversion.c pg_backend_support.c pg_userfuncs.c pg_rsupport.c
 OBJS		:= $(SRCS:.c=.o)
-SHLIB_LINK	:= -L$(r_libdir) -lR
+SHLIB_LINK	+= -L$(r_libdir) -lR
 
 DATA_built	:= plr.sql 
 DOCS		:= README.plr
