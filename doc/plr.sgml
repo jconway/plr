@@ -57,11 +57,9 @@
 
   <note>
    <para>
-   PL/R should build cleanly with PostgreSQL 7.3.x, and 7.4devel. It was
+   PL/R should build cleanly with PostgreSQL 7.3.x, and 7.4beta. It was
    initially developed using libR from R 1.6.2 under Red Hat 7.3 & 8.0. PL/R
-   has also passed its regression test with R 1.7.0 under Red Hat 7.3 & 8.0.
-   On Red Hat 9, the R-patched (R 1.7.0 with subsequent release 1.7.x patches)
-   distribution is required (and passes `make installcheck`).
+   has also passed its regression test with R 1.7.1 under Red Hat 7.3, 8.0, & 9.
    </para>
   </note>
 
@@ -99,6 +97,7 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
 
   <tip>
    <para>
+    R headers are required. Download and install R prior to building PL/R.
     R must have been built with the <literal>--enable-R-shlib</literal> option
     when it was configured, in order for the libR shared object library to be
     available.

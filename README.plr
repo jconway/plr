@@ -40,7 +40,21 @@ Version 0.2 (15 February, 2003):
 Version 0.5 (5 August, 2003):
     - See http://www.joeconway.com/plr/ for release notes
 
+Notes:
+    - R headers are required. Download and install R prior to building
+      PL/R.
+
+    - R must have been built with the --enable-R-shlib option when it was
+      configured, in order for the libR shared object library to be available.
+
+    - R_HOME must be defined in the environment of the user under which
+      PostgreSQL is started, before the postmaster is started. Otherwise
+      PL/R will refuse to load.
+
 Installation:
+  See http://www.joeconway.com/plr/doc/plr-install.html
+  for the most up-to-date instructions.
+
   Place these files in a directory called 'plr' under 'contrib' in the
   PostgreSQL source tree. E.g. place the tarred source file in 
   '/path/to/pg_source/contrib' and run:
