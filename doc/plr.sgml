@@ -468,6 +468,81 @@ select pg_test_install('hello world');
     <xref linkend="plr-module-funcs">
    </para>
 
+   <para>
+    PL/R also provides a global variable called pg.state.firstpass. This
+    variable is reset to TRUE the first time <emphasis>each</emphasis> PL/R
+    function is called, for a particular query. On subsequent calls the
+    value is left unchanged. This allows one or more PL/R functions to
+    perform a possibly expensive initialization on the first call, and
+    reuse the results for the remaining rows in the query. For example:
+    <programlisting>
+create table t (f1 int);
+insert into t values (1);
+insert into t values (2);
+insert into t values (3);
+
+create or replace function f1() returns int as '
+  msg <- paste("enter f1, pg.state.firstpass is", pg.state.firstpass)
+  pg.thrownotice(msg)
+  if (pg.state.firstpass == TRUE)
+    pg.state.firstpass &lt;&lt;- FALSE
+  msg &lt;- paste("exit f1, pg.state.firstpass is", pg.state.firstpass)
+  pg.thrownotice(msg)
+  return(0)
+' language plr;
+
+create or replace function f2() returns int as '
+  msg &lt;- paste("enter f2, pg.state.firstpass is", pg.state.firstpass)
+  pg.thrownotice(msg)
+  if (pg.state.firstpass == TRUE)
+    pg.state.firstpass &lt;&lt;- FALSE
+  msg &lt;- paste("exit f2, pg.state.firstpass is", pg.state.firstpass)
+  pg.thrownotice(msg)
+  return(0)
+' language plr;
+
+select f1(), f2(), f1 from t;
+NOTICE:  enter f1, pg.state.firstpass is TRUE
+NOTICE:  exit f1, pg.state.firstpass is FALSE
+NOTICE:  enter f2, pg.state.firstpass is TRUE
+NOTICE:  exit f2, pg.state.firstpass is FALSE
+NOTICE:  enter f1, pg.state.firstpass is FALSE
+NOTICE:  exit f1, pg.state.firstpass is FALSE
+NOTICE:  enter f2, pg.state.firstpass is FALSE
+NOTICE:  exit f2, pg.state.firstpass is FALSE
+NOTICE:  enter f1, pg.state.firstpass is FALSE
+NOTICE:  exit f1, pg.state.firstpass is FALSE
+NOTICE:  enter f2, pg.state.firstpass is FALSE
+NOTICE:  exit f2, pg.state.firstpass is FALSE
+ f1 | f2 | f1
+----+----+----
+  0 |  0 |  1
+  0 |  0 |  2
+  0 |  0 |  3
+(3 rows)
+
+create or replace function row_number() returns int as '
+  if (pg.state.firstpass)
+  {
+    assign("pg.state.firstpass", FALSE, env=.GlobalEnv)
+    lclcntr &lt;- 1
+  }
+  else
+    lclcntr &lt;- plrcounter + 1
+  assign("plrcounter", lclcntr, env=.GlobalEnv)
+  return(lclcntr)
+' language 'plr';
+
+SELECT row_number(), f1 from t;
+ row_number | f1
+------------+----
+          1 |  1
+          2 |  2
+          3 |  3
+(3 rows)
+    </programlisting>
+   </para>
+
  </chapter>
 
  <chapter id="plr-spi-rsupport-funcs">
