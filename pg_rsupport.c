@@ -189,20 +189,31 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 		int				nc = tupdesc->natts;
 		int				i = 0;
 		int				j = 0;
-		int				z = 0;
-		SEXP			tmp = NULL;
 		SEXP			fldvec = NULL;
 		SEXP			names = NULL;
 		SEXP			row_names = NULL;
 		char			buf[256];
 		SEXP			result;
 		char		   *value;
+		SEXP			fun, rargs;
+
+		/* get a reference to the R "factor" function */
+		PROTECT(fun = Rf_findFun(Rf_install("factor"), R_GlobalEnv));
+
+		/*
+		 * create an array of R objects with the number of elements
+		 * equal to the number of arguments needed by "factor".
+		 */
+		PROTECT(rargs = allocVector(VECSXP, 2));
+
+		/* the first arg to "factor" is NIL */
+		SET_VECTOR_ELT(rargs, 0, R_NilValue);
 
 		/*
 		 * Allocate the data.frame initially as a list,
 		 * and also allocate a names vector for the column names
 		 */
-		PROTECT(result = allocList(nc));
+		PROTECT(result = allocVector(VECSXP, nc));
 	    PROTECT(names = allocVector(STRSXP, nc));
 
 		/*
@@ -220,6 +231,7 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 			 */
 			switch (SPI_gettypeid(tupdesc, j + 1))
 			{
+				case OIDOID:
 				case INT2OID:
 				case INT4OID:
 					/*
@@ -272,9 +284,6 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 					/*
 					 * Everything else is defaulted to string
 					 * which should be converted into a factor column
-					 * once we're back in R (per the manual).
-					 * It didn't seem like it would be worth
-					 * the effort to create a factor column in C directly.
 					 */
 					PROTECT(fldvec = NEW_CHARACTER(nr));
 
@@ -285,32 +294,24 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 						else
 							SET_STRING_ELT(fldvec, i, NA_STRING);
 					}
+
+					/* the second arg to "factor" is our character vector */
+					SET_VECTOR_ELT(rargs, 1, fldvec);
+
+					/* convert to a factor */
+					PROTECT(fldvec = callRFunction(fun, rargs));
+					UNPROTECT(1);
 			}
 
-			/*
-			 * Clone the list
-			 */
-			PROTECT(tmp = result);
-
-			/*
-			 * Get the address for the list element for this column
-			 */
-			for (z = 0; z < j; z++)
-				tmp = CDR(tmp);
-
-			/*
-			 * Attach the current column data
-			 */
-			SETCAR(tmp, fldvec);
-
-			UNPROTECT(2);
+			SET_VECTOR_ELT(result, j, fldvec);
+			UNPROTECT(1);
 		}
 
 		/*
 		 * Attach the column names
 		 */
 	    setAttrib(result, R_NamesSymbol, names);
-		UNPROTECT(1);
+		UNPROTECT(3);
 
 		/*
 		 * Attach the row names - basically just the row number,

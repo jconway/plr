@@ -124,6 +124,7 @@ extern int Rf_initEmbeddedR(int argc, char **argv);
 /* PL/R language handler */
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
 extern void load_r_cmd(const char *cmd);
+extern SEXP callRFunction(SEXP fun, SEXP rargs);
 
 /* Postgres support functions installed into the R interpreter */
 extern void throw_pg_error(const char **msg);

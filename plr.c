@@ -99,14 +99,11 @@ static Datum plr_func_handler(PG_FUNCTION_ARGS);
 static plr_proc_desc *compile_plr_function(Oid fn_oid, bool is_trigger);
 static plr_proc_desc *GetProdescByName(char *name);
 static SEXP plr_parseFunctionBody(const char *body);
-static SEXP callRFunction(SEXP fun, SEXP rargs);
 static SEXP plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo);
 static SEXP pg_get_r(plr_proc_desc *prodesc, FunctionCallInfo fcinfo, int idx);
 static void pg_get_one_r(char *value, Oid arg_out_fn_oid, SEXP *obj, int elnum);
 static void get_r_vector(Oid typtype, SEXP *obj, int numels);
 static Datum r_get_pg(SEXP rval, plr_proc_desc *prodesc);
-static SEXP pg_get_r_tuple(TupleDesc desc, HeapTuple tuple, Relation relation);
-
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -785,7 +782,7 @@ plr_parseFunctionBody(const char *body)
 	return(fun);
 }
 
-static SEXP
+SEXP
 callRFunction(SEXP fun, SEXP rargs)
 {
 	int		i;
@@ -1040,14 +1037,17 @@ r_get_pg(SEXP rval, plr_proc_desc *prodesc)
 	FmgrInfo	result_in_func = prodesc->result_in_func;
 	Oid			result_elem = prodesc->result_elem;
 
+	/* short circuit if return value is Null */
+	if (isNull(rval))
+		return (Datum) 0;
+
 	if (result_elem == 0)
 	{
 		/*
 		 * if the element type is zero, we don't have an array,
-		 * so just convert as a scalar value
+		 * so coerce to string and take the first element as a scalar
 		 */
 		PROTECT(obj);
-
 		obj =  AS_CHARACTER(rval);
 		value = CHAR(STRING_ELT(obj, 0));
 
@@ -1071,6 +1071,30 @@ r_get_pg(SEXP rval, plr_proc_desc *prodesc)
 		int			objlen;
 		Datum	   *dvalues;
 		ArrayType  *array;
+
+
+		/* data.frame - treat as 2d pg array */
+			/* currently maps columns as "c(...)" to 1d array */
+		/* matrix - treat as 2d pg array */
+			/* currently maps all elements to 1d array */
+		/* array - N > 2 treat as Nd pg array, unless N > 6 then error */
+			/* currently maps all elements to 1d array */
+
+
+		/* array - N == 1 treat as 1d pg array */
+			/* works as is */
+		/* list - treat as 1d pg array */
+			/* works as is */
+		/* vector - treat as 1d pg array */
+			/* works as is */
+
+		/*
+		Rboolean isReal(SEXP s)
+		Rboolean isInteger(SEXP s)
+		Rboolean isLogical(SEXP s)
+		Rboolean isNumeric(SEXP s)
+		Rboolean isString(SEXP s)
+		*/
 
 		objlen = length(rval);
 
@@ -1104,25 +1128,4 @@ r_get_pg(SEXP rval, plr_proc_desc *prodesc)
 
 	return dvalue;
 }
-
-static  SEXP
-pg_get_r_tuple(TupleDesc desc, HeapTuple tuple, Relation relation)
-{
-	SEXP		rtup,
-				attrNames;
-
-    /* This is the version that returns a reference. */
-	PROTECT(rtup = NEW_NUMERIC(3));
-
-	NUMERIC_DATA(rtup)[0] = (double) (long) tuple;
-	NUMERIC_DATA(rtup)[1] = (double) (long) desc;
-	NUMERIC_DATA(rtup)[2] = (double) (long) relation;  
-	PROTECT(attrNames = NEW_CHARACTER(1));
-	SET_STRING_ELT(attrNames, 0, COPY_TO_USER_STRING("PostgresTupleRef"));
-	SET_CLASS(rtup, attrNames);
-
-	UNPROTECT(2);
-
-	return(rtup);
-}    
 
