@@ -34,13 +34,7 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 
-/* from unistd.h */
-extern char **__environ;
-#ifdef __USE_GNU
 extern char **environ;
-#else
-#define environ __environ
-#endif
 
 static ArrayType *plr_array_create(FunctionCallInfo fcinfo,
 								   int numelems, int elem_start);

@@ -813,16 +813,16 @@ select * from test_spi_execp('sp') as t(typeid oid, typename name);
         that implements this PostgreSQL function is capable of accepting and
         returning other data types, although the return type must be an array
         of the input parameter type. It can also accept multiple input
-        parameters. For example, to define an <function>array</function>
+        parameters. For example, to define an <function>plr_array</function>
         function to create a text array from two input text values:
      <programlisting>
-CREATE OR REPLACE FUNCTION array (text, text)
+CREATE OR REPLACE FUNCTION plr_array (text, text)
 RETURNS text[]
-AS '$libdir/plr','array'
+AS '$libdir/plr','plr_array'
 LANGUAGE 'C' WITH (isstrict);
 
-select array('hello','world');
-     array
+select plr_array('hello','world');
+   plr_array
 ---------------
  {hello,world}
 (1 row)
@@ -842,16 +842,16 @@ select array('hello','world');
         This function is predefined to accept one float8 array and a float8
         value, and return a float8 array. The C function that implements this
         PostgreSQL function is capable of accepting and returning other data
-        types. For example, to define an <function>array_push</function>
+        types. For example, to define an <function>plr_array_push</function>
         function to add a text value to an existing text array:
      <programlisting>
-CREATE OR REPLACE FUNCTION array_push (_text, text)
+CREATE OR REPLACE FUNCTION plr_array_push (_text, text)
 RETURNS text[]
-AS '$libdir/plr','array_push'
+AS '$libdir/plr','plr_array_push'
 LANGUAGE 'C' WITH (isstrict);
 
-select array_push(array('hello','world'), 'how are you');
-         array_push
+select plr_array_push(plr_array('hello','world'), 'how are you');
+       plr_array_push
 -----------------------------
  {hello,world,"how are you"}
 (1 row)
@@ -874,22 +874,22 @@ select array_push(array('hello','world'), 'how are you');
         to accept one float8 array and a float8 value, and return a float8
         array. The C function that implements this PostgreSQL function is
         capable of accepting and returning other data types. For example,
-        to define an <function>array_accum</function> function to add an
+        to define an <function>plr_array_accum</function> function to add an
         int4 value to an existing int4 array:
         <programlisting>
-CREATE OR REPLACE FUNCTION array_accum (_int4, int4)
+CREATE OR REPLACE FUNCTION plr_array_accum (_int4, int4)
 RETURNS int4[]
-AS '$libdir/plr','array_accum'
+AS '$libdir/plr','plr_array_accum'
 LANGUAGE 'C';
 
-select array_accum(NULL, 42);
- array_accum
+select plr_array_accum(NULL, 42);
+ plr_array_accum
 -------------
  {42}
 (1 row)
-select array_accum('{23,35}', 42);
- array_accum
--------------
+select plr_array_accum('{23,35}', 42);
+ plr_array_accum
+-----------------
  {23,35,42}
 (1 row)
         </programlisting>
@@ -937,7 +937,7 @@ select array_accum('{23,35}', 42);
     <para>
      There is more than one way to create a new aggregate using PL/R. A simple
      aggregate can be defined using the predefined PostgreSQL C function,
-     <function>array_accum</function> (see 
+     <function>plr_array_accum</function> (see 
      <xref linkend="plr-pgsql-support-funcs">) as a state transition function,
      and a PL/R function as a finalizer. For example:
      <programlisting>
@@ -946,7 +946,7 @@ create or replace function r_median(_float8) returns float as '
 ' language 'plr';
 
 CREATE AGGREGATE median (
-  sfunc = array_accum,
+  sfunc = plr_array_accum,
   basetype = float8,
   stype = _float8,
   finalfunc = r_median
