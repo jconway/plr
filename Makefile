@@ -3,6 +3,10 @@ r_libdir = ${R_HOME}/bin
 # location of R includes
 r_includespec = ${R_HOME}/include
 
+ifeq ($(PORTNAME), darwin)
+DYSUFFIX = dylib
+endif
+
 subdir = contrib/plr
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
@@ -10,8 +14,14 @@ include $(top_builddir)/src/Makefile.global
 # we can only build PL/R if libR is available
 # Since there is no official way to determine this,
 # we see if there is a file that is named like a shared library.
+ifneq ($(PORTNAME), darwin)
 ifneq (,$(wildcard $(r_libdir)/libR*$(DLSUFFIX)*))
-shared_libr = yes
+	shared_libr = yes;
+endif
+else
+ifneq (,$(wildcard $(r_libdir)/libR*$(DYSUFFIX)*))
+	shared_libr = yes
+endif
 endif
 
 # If we don't have a shared library and the platform doesn't allow it
