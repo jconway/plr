@@ -287,8 +287,8 @@ void
 start_interp(void)
 {
 	char	   *r_home;
-	int			argc;
-	char	   *argv[] = {"PL/R", "--gui=none", "--silent", "--no-save"};
+	int			rargc;
+	char	   *rargv[] = {"PL/R", "--gui=none", "--silent", "--no-save"};
 
 	/* refuse to start more than once */
 	if (plr_interp_started == true)
@@ -300,8 +300,8 @@ start_interp(void)
 		elog(ERROR, "plr: cannot start interpreter unless R_HOME " \
 					"environment variable is defined");
 
-	argc = sizeof(argv)/sizeof(argv[0]);
-	Rf_initEmbeddedR(argc, argv);
+	rargc = sizeof(rargv)/sizeof(rargv[0]);
+	Rf_initEmbeddedR(rargc, rargv);
 	plr_interp_started = true;
 }
 

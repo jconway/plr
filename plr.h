@@ -201,26 +201,13 @@ extern SEXP R_ParseVector(SEXP, int, int *);
  * working with postgres 7.4 compatible sources
  *************************************************************************/
 
-#define INIT_FINFO_FUNCEXPR \
-	do { \
-		FuncExpr	   *funcexpr = NULL; \
-		MemoryContext	oldcontext; \
-		oldcontext = MemoryContextSwitchTo(TopMemoryContext); \
-		funcexpr = (FuncExpr *) make_funcclause(functionId, \
-						  get_func_rettype(functionId), \
-						  false, COERCE_DONTCARE, NIL); \
-		funcexpr->argtypes = get_func_argtypes(functionId, &funcexpr->nargs); \
-		finfo->fn_expr = (Node *) funcexpr; \
-		MemoryContextSwitchTo(oldcontext); \
-	} while (0)
-
 #define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, false, SortMem)
 #define GET_PRORETTYPE(prorettype_) \
 	do { \
 		if (procStruct->prorettype == ANYARRAYOID || \
 			procStruct->prorettype == ANYELEMENTOID) \
 		{ \
-			prorettype_ = get_expr_rettype(fcinfo); \
+			prorettype_ = get_fn_expr_rettype(fcinfo); \
 			if (prorettype_ == InvalidOid) \
 				prorettype_ = procStruct->prorettype; \
 		} \
@@ -237,7 +224,7 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 			if (procStruct->proargtypes[i] == ANYARRAYOID || \
 				procStruct->proargtypes[i] == ANYELEMENTOID) \
 			{ \
-				proargtypes_[i] = get_expr_argtype(fcinfo, i); \
+				proargtypes_[i] = get_fn_expr_argtype(fcinfo, i); \
 				if (proargtypes_[i] == InvalidOid) \
 					proargtypes_[i] = procStruct->proargtypes[i]; \
 			} \
@@ -332,11 +319,13 @@ extern SEXP plr_SPI_lastoid(void);
 /* Postgres callable functions useful in conjunction with PL/R */
 extern Datum reload_plr_modules(PG_FUNCTION_ARGS);
 extern Datum install_rcmd(PG_FUNCTION_ARGS);
-extern Datum array_push(PG_FUNCTION_ARGS);
-extern Datum array(PG_FUNCTION_ARGS);
-extern Datum array_accum(PG_FUNCTION_ARGS);
+extern Datum plr_array_push(PG_FUNCTION_ARGS);
+extern Datum plr_array(PG_FUNCTION_ARGS);
+extern Datum plr_array_accum(PG_FUNCTION_ARGS);
+extern Datum plr_environ(PG_FUNCTION_ARGS);
 
 /* Postgres backend support functions */
+extern bool isArrayTypeName(const char *typeName);
 extern char *get_load_self_ref_cmd(Oid funcid);
 extern void perm_fmgr_info(Oid functionId, FmgrInfo *finfo);
 extern void system_cache_lookup(Oid element_type, bool input, int *typlen,
@@ -360,8 +349,7 @@ extern void R_ReleaseObject(SEXP);
 extern ArrayType *construct_md_array(Datum *elems, int ndims, int *dims,
 									 int *lbs, Oid elmtype, int elmlen,
 									 bool elmbyval, char elmalign);
-extern bool isArrayTypeName(const char *typeName);
-extern Oid get_expr_rettype(FunctionCallInfo fcinfo);
+extern Oid get_fn_expr_rettype(FunctionCallInfo fcinfo);
 
 #endif /* PG_VERSION_73_COMPAT */
 

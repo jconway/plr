@@ -31,8 +31,19 @@
  * pg_userfuncs.c - User visible PostgreSQL functions
  */
 #include "plr.h"
+#include "funcapi.h"
+#include "miscadmin.h"
 
-static ArrayType *array_create(FunctionCallInfo fcinfo, int numelems, int elem_start);
+/* from unistd.h */
+extern char **__environ;
+#ifdef __USE_GNU
+extern char **environ;
+#else
+#define environ __environ
+#endif
+
+static ArrayType *plr_array_create(FunctionCallInfo fcinfo,
+								   int numelems, int elem_start);
 
 /*-----------------------------------------------------------------------------
  * reload_modules :
@@ -77,13 +88,13 @@ install_rcmd(PG_FUNCTION_ARGS)
  *		form a one-dimensional array given starting elements
  *----------------------------------------------------------------------------
  */
-PG_FUNCTION_INFO_V1(array);
+PG_FUNCTION_INFO_V1(plr_array);
 Datum
-array(PG_FUNCTION_ARGS)
+plr_array(PG_FUNCTION_ARGS)
 {
 	ArrayType  *result;
 
-	result = array_create(fcinfo, PG_NARGS(), 0);
+	result = plr_array_create(fcinfo, PG_NARGS(), 0);
 
 	PG_RETURN_ARRAYTYPE_P(result);
 }
@@ -93,9 +104,9 @@ array(PG_FUNCTION_ARGS)
  *		push an element onto the end of a one-dimensional array
  *----------------------------------------------------------------------------
  */
-PG_FUNCTION_INFO_V1(array_push);
+PG_FUNCTION_INFO_V1(plr_array_push);
 Datum
-array_push(PG_FUNCTION_ARGS)
+plr_array_push(PG_FUNCTION_ARGS)
 {
 	ArrayType  *v;
 	Datum		newelem;
@@ -141,9 +152,9 @@ array_push(PG_FUNCTION_ARGS)
  *		a statistic, this can be used to create custom aggregates.
  *----------------------------------------------------------------------------
  */
-PG_FUNCTION_INFO_V1(array_accum);
+PG_FUNCTION_INFO_V1(plr_array_accum);
 Datum
-array_accum(PG_FUNCTION_ARGS)
+plr_array_accum(PG_FUNCTION_ARGS)
 {
 	Datum		v;
 	Datum		newelem;
@@ -155,7 +166,7 @@ array_accum(PG_FUNCTION_ARGS)
 
 	/* create a new array from the second argument if first is NULL */
 	if (PG_ARGISNULL(0))
-		PG_RETURN_ARRAYTYPE_P(array_create(fcinfo, 1, 1));
+		PG_RETURN_ARRAYTYPE_P(plr_array_create(fcinfo, 1, 1));
 
 	/* return the first argument if the second is NULL */
 	if (PG_ARGISNULL(1))
@@ -164,7 +175,7 @@ array_accum(PG_FUNCTION_ARGS)
 	v = PG_GETARG_DATUM(0);
 	newelem = PG_GETARG_DATUM(1);
 
-	result = DatumGetArrayTypeP(DirectFunctionCall2(array_push, v, newelem));
+	result = DatumGetArrayTypeP(DirectFunctionCall2(plr_array_push, v, newelem));
 
 	PG_RETURN_ARRAYTYPE_P(result);
 }
@@ -181,7 +192,7 @@ array_accum(PG_FUNCTION_ARGS)
  * number 1 (i.e. the second argument).
  */
 static ArrayType *
-array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
+plr_array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
 {
 	Oid			funcid = fcinfo->flinfo->fn_oid;
 	Datum	   *dvalues = (Datum *) palloc(numelems * sizeof(Datum));
@@ -222,7 +233,7 @@ array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
 	 */
 	for (i = elem_start; i < elem_start + numelems; i++)
 		if (funcargtypes[i] != element_type)
-			elog(ERROR, "array_create: argument %d datatype not " \
+			elog(ERROR, "plr_array_create: argument %d datatype not " \
 						"compatible with return data type", i + 1);
 	ReleaseSysCache(tp);
 
@@ -233,5 +244,94 @@ array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
 							 typlen, typbyval, typalign);
 
 	return result;
+}
+
+/*-----------------------------------------------------------------------------
+ * plr_environ :
+ *		utility function to display the environment under which the
+ *		postmaster is running.
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(plr_environ);
+Datum
+plr_environ(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	Tuplestorestate	   *tupstore;
+	HeapTuple			tuple;
+	TupleDesc			tupdesc;
+	AttInMetadata	   *attinmeta;
+	MemoryContext		per_query_ctx;
+	MemoryContext		oldcontext;
+	char			  **current_env;
+	char			   *var_name;
+	char			   *var_val;
+	char			   *values[2];
+
+	/* check to see if caller supports us returning a tuplestore */
+	if (!rsinfo || !(rsinfo->allowedModes & SFRM_Materialize))
+		elog(ERROR, "plr_environ: materialize mode required, but it is not "
+			 "allowed in this context");
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	/* get the requested return tuple description */
+	tupdesc = CreateTupleDescCopy(rsinfo->expectedDesc);
+
+	/*
+	 * Check to make sure we have a reasonable tuple descriptor
+	 */
+	if (tupdesc->natts != 2 ||
+		tupdesc->attrs[0]->atttypid != TEXTOID ||
+		tupdesc->attrs[1]->atttypid != TEXTOID)
+		elog(ERROR, "plr_environ: query-specified return tuple and " \
+					"plr_environ function are not compatible");
+
+	/* OK to use it */
+	attinmeta = TupleDescGetAttInMetadata(tupdesc);
+
+	/* let the caller know we're sending back a tuplestore */
+	rsinfo->returnMode = SFRM_Materialize;
+
+	/* initialize our tuplestore */
+	tupstore = tuplestore_begin_heap(true, false, SortMem);
+
+	for (current_env = environ;
+		 current_env != NULL && *current_env != NULL;
+		 current_env++)
+	{
+		Size	name_len;
+
+		var_val = strchr(*current_env, '=');
+		if (!var_val)
+			continue;
+
+		name_len = var_val - *current_env;
+		var_name = (char *) palloc0(name_len + 1);
+		memcpy(var_name, *current_env, name_len);
+
+		values[0] = var_name;
+		values[1] = var_val + 1;
+
+		tuple = BuildTupleFromCStrings(attinmeta, values);
+		tuplestore_puttuple(tupstore, tuple);
+		pfree(var_name);
+	}
+
+	tuplestore_donestoring(tupstore);
+	rsinfo->setResult = tupstore;
+
+	/*
+	 * SFRM_Materialize mode expects us to return a NULL Datum. The actual
+	 * tuples are in our tuplestore and passed back through
+	 * rsinfo->setResult. rsinfo->setDesc is set to the tuple description
+	 * that we actually used to build our tuples with, so the caller can
+	 * verify we did what it was expecting.
+	 */
+	rsinfo->setDesc = tupdesc;
+	MemoryContextSwitchTo(oldcontext);
+
+	return (Datum) 0;
 }
 

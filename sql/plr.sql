@@ -94,12 +94,12 @@ insert into foo values(9,'cat2',1.30);
 
 create or replace function r_median(_float8) returns float as 'median(arg1)' language 'plr';
 select r_median('{1.23,1.31,1.42,1.27}'::_float8);
-CREATE AGGREGATE median (sfunc = array_accum, basetype = float8, stype = _float8, finalfunc = r_median);
+CREATE AGGREGATE median (sfunc = plr_array_accum, basetype = float8, stype = _float8, finalfunc = r_median);
 select f1, median(f2) from foo group by f1 order by f1;
 
 create or replace function r_gamma(_float8) returns float as 'gamma(arg1)' language 'plr';
 select round(r_gamma('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
-CREATE AGGREGATE gamma (sfunc = array_accum, basetype = float8, stype = _float8, finalfunc = r_gamma);
+CREATE AGGREGATE gamma (sfunc = plr_array_accum, basetype = float8, stype = _float8, finalfunc = r_gamma);
 select f1, round(gamma(f2)::numeric,8) from foo group by f1 order by f1;
 
 --

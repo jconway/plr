@@ -89,6 +89,18 @@ construct_md_array(Datum *elems,
 	return array;
 }
 
+Oid
+get_fn_expr_rettype(FunctionCallInfo fcinfo)
+{
+	/* can't return anything useful if we have no FmgrInfo */
+	if (fcinfo->flinfo == NULL)
+		return InvalidOid;
+	
+	return get_func_rettype(fcinfo->flinfo->fn_oid);
+}
+
+#endif /* PG_VERSION_73_COMPAT */
+
 /*
  * isArrayTypeName(typeName)
  *	  - given a type name determine if it is an array type name
@@ -100,18 +112,6 @@ isArrayTypeName(const char *typeName)
 {
 	return (typeName[0] == '_');
 }
-
-Oid
-get_expr_rettype(FunctionCallInfo fcinfo)
-{
-	/* can't return anything useful if we have no FmgrInfo */
-	if (fcinfo->flinfo == NULL)
-		return InvalidOid;
-	
-	return get_func_rettype(fcinfo->flinfo->fn_oid);
-}
-
-#endif /* PG_VERSION_73_COMPAT */
 
 static char *
 get_lib_pathstr(Oid funcid)
@@ -183,7 +183,7 @@ perm_fmgr_info(Oid functionId, FmgrInfo *finfo)
 {
 	fmgr_info_cxt(functionId, finfo, TopMemoryContext);
 	finfo->fn_mcxt = QueryContext;
-	INIT_FINFO_FUNCEXPR;
+	finfo->fn_expr = (Node *) NULL;
 }
 
 void
