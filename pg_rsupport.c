@@ -58,28 +58,12 @@ void
 throw_pg_notice(const char **msg)
 {
 	/* skip error CONTEXT for explicitly called messages */
-	ERRORCONTEXTCALLBACK;
 	SAVE_PLERRCONTEXT;
 
 	if (msg && *msg)
 		elog(NOTICE, "%s", *msg);
 	else
 		elog(NOTICE, "%s", "");
-
-	RESTORE_PLERRCONTEXT;
-}
-
-void
-throw_pg_error(const char **msg)
-{
-	/* skip error CONTEXT for explicitly called messages */
-	ERRORCONTEXTCALLBACK;
-	SAVE_PLERRCONTEXT;
-
-	if (msg && *msg)
-		elog(ERROR, "%s", *msg);
-	else
-		elog(ERROR, "%s", "");
 
 	RESTORE_PLERRCONTEXT;
 }

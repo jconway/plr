@@ -66,7 +66,7 @@ static FunctionCallInfo plr_current_fcinfo = NULL;
 			"{.C(\"throw_pg_notice\", as.character(msg))}"
 #define THROWERROR_CMD \
 			"pg.throwerror <-function(msg) " \
-			"{.C(\"throw_pg_error\", as.character(msg))}"
+			"{stop(msg, call. = FALSE)}"
 #define QUOTE_LITERAL_CMD \
 			"pg.quoteliteral <-function(sql) " \
 			"{.Call(\"plr_quote_literal\", sql)}"
@@ -133,6 +133,8 @@ plr_call_handler(PG_FUNCTION_ARGS)
 {
 	Datum			retval;
 	MemoryContext	origcontext = CurrentMemoryContext;
+	/* save caller's SPI context */
+	MemoryContext	plr_SPI_context_save = plr_SPI_context;
 
 	/* Connect to SPI manager */
 	if (SPI_connect() != SPI_OK_CONNECT)
@@ -161,6 +163,9 @@ plr_call_handler(PG_FUNCTION_ARGS)
 
 	if (SPI_finish() != SPI_OK_FINISH)
 		elog(ERROR, "plr: SPI_finish() failed");
+
+	/* restore caller's SPI context */
+	plr_SPI_context = plr_SPI_context_save;
 
 	return retval;
 }

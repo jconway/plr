@@ -201,14 +201,15 @@ typedef enum IOFuncSelector
 	} while (0)
 
 #define SAVE_PLERRCONTEXT \
+	ErrorContextCallback *ecs_save; \
 	do { \
-		plerrcontext.previous = error_context_stack; \
+		ecs_save = error_context_stack; \
 		error_context_stack = NULL; \
 	} while (0)
 
 #define RESTORE_PLERRCONTEXT \
 	do { \
-		error_context_stack = plerrcontext.previous; \
+		error_context_stack = ecs_save; \
 	} while (0)
 
 #endif /* PG_VERSION_73_COMPAT */
@@ -287,7 +288,6 @@ extern Datum get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_ele
 
 /* Postgres support functions installed into the R interpreter */
 extern void throw_pg_notice(const char **msg);
-extern void throw_pg_error(const char **msg);
 extern SEXP plr_quote_literal(SEXP rawstr);
 extern SEXP plr_quote_ident(SEXP rawstr);
 extern SEXP plr_SPI_exec(SEXP rsql);
