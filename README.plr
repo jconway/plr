@@ -30,14 +30,30 @@
  * 
  */
 Version 0.1 (10 February, 2003):
-    - initial release
+    - Initial release
+
+Version 0.2 (15 February, 2003):
+    - Incorporates fixes for lots of bugs and ommissions, in the code and
+      docs. Too many to mention, but faithfully recorded in cvs commit
+      messages.
 
 Installation:
   Place these files in a directory called 'plr' under 'contrib' in the
-  PostgreSQL source tree. Then run:
+  PostgreSQL source tree. E.g. place the tarred source file in 
+  '/path/to/pg_source/contrib' and run:
 
+    tar -xzf plr.x.y.z.tar.gz
+
+  Then run:
+
+	cd /path/to/pg_source/contrib/plr
     make
     make install
+    make installcheck
+
+  This is usually best done logged in as the PostgreSQL superuser
+  (defaults to postgres), except root privileges may be needed for
+  "make install".
 
   You can use plr.sql to create the functions in your database of choice, e.g.
 
