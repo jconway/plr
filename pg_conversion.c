@@ -7,9 +7,8 @@
  * 
  * Joe Conway <mail@joeconway.com>
  * 
- * Heavily based on pltcl by Jan Wieck
- * and
- * on REmbeddedPostgres by
+ * Based on pltcl by Jan Wieck
+ * and inspired by REmbeddedPostgres by
  * Duncan Temple Lang <duncan@research.bell-labs.com>
  * http://www.omegahat.org/RSPostgres/
  *

@@ -7,9 +7,8 @@
  * 
  * Joe Conway <mail@joeconway.com>
  * 
- * Heavily based on pltcl by Jan Wieck
- * and
- * on REmbeddedPostgres by
+ * Based on pltcl by Jan Wieck
+ * and inspired by REmbeddedPostgres by
  * Duncan Temple Lang <duncan@research.bell-labs.com>
  * http://www.omegahat.org/RSPostgres/
  *
@@ -453,7 +452,7 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	PROTECT(rargs = plr_convertargs(prodesc, fcinfo));
 
 	/* Call the R function */
-	PROTECT(rvalue = callRFunction(fun, rargs));
+	PROTECT(rvalue = call_r_func(fun, rargs));
 
 	/* switch out of current memory context into the function's context */
 	oldcontext = MemoryContextSwitchTo(fcinfo->flinfo->fn_mcxt);
@@ -781,15 +780,16 @@ get_prodesc_by_name(char *name)
 static SEXP
 plr_parse_func_body(const char *body)
 {
-	SEXP	txt;
+	SEXP	rbody;
 	SEXP	fun;
 	int		status;
 
-	PROTECT(txt = NEW_CHARACTER(1));
-	SET_STRING_ELT(txt, 0, COPY_TO_USER_STRING(body));
+	PROTECT(rbody = NEW_CHARACTER(1));
+	SET_STRING_ELT(rbody, 0, COPY_TO_USER_STRING(body));
 
-	PROTECT(fun = VECTOR_ELT(R_ParseVector(txt, -1, &status), 0));
-	if (status != PARSE_OK) {
+	PROTECT(fun = VECTOR_ELT(R_ParseVector(rbody, -1, &status), 0));
+	if (status != PARSE_OK)
+	{
 	    UNPROTECT(2);
 		elog(ERROR, "plr: R parse error");
 	}
@@ -799,34 +799,33 @@ plr_parse_func_body(const char *body)
 }
 
 SEXP
-callRFunction(SEXP fun, SEXP rargs)
+call_r_func(SEXP fun, SEXP rargs)
 {
 	int		i;
 	int		errorOccurred;
-	SEXP	c,
+	SEXP	obj,
+			args,
 			call,
 			ans;
-	long	n = Rf_length(rargs);
+	long	n = length(rargs);
 
 	if(n > 0)
 	{
-		PROTECT(c = call = Rf_allocList(n));
+		PROTECT(obj = args = allocList(n));
 		for (i = 0; i < n; i++)
 		{
-			SETCAR(c, VECTOR_ELT(rargs, i));
-			c = CDR(c);
+			SETCAR(obj, VECTOR_ELT(rargs, i));
+			obj = CDR(obj);
 		}
-
-		call = Rf_lcons(fun, call);
 		UNPROTECT(1);
+		PROTECT(call = lcons(fun, args));
 	}
 	else
 	{
-		call = Rf_allocVector(LANGSXP,1);
+		PROTECT(call = allocVector(LANGSXP,1));
 		SETCAR(call, fun);
 	}
 
-	PROTECT(call);
 	ans = R_tryEval(call, R_GlobalEnv, &errorOccurred);
 	UNPROTECT(1);
 

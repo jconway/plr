@@ -6,10 +6,9 @@
  * ALL RIGHTS RESERVED;
  * 
  * Joe Conway <mail@joeconway.com>
- *
- * Heavily based on pltcl by Jan Wieck
- * and
- * on REmbeddedPostgres by
+ * 
+ * Based on pltcl by Jan Wieck
+ * and inspired by REmbeddedPostgres by
  * Duncan Temple Lang <duncan@research.bell-labs.com>
  * http://www.omegahat.org/RSPostgres/
  *
@@ -154,7 +153,7 @@ extern int Rf_initEmbeddedR(int argc, char **argv);
 /* PL/R language handler */
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
 extern void load_r_cmd(const char *cmd);
-extern SEXP callRFunction(SEXP fun, SEXP rargs);
+extern SEXP call_r_func(SEXP fun, SEXP rargs);
 
 /* argument and return value conversion functions */
 extern SEXP pg_get_r(plr_proc_desc *prodesc, FunctionCallInfo fcinfo, int idx);

@@ -7,9 +7,8 @@
  * 
  * Joe Conway <mail@joeconway.com>
  * 
- * Heavily based on pltcl by Jan Wieck
- * and
- * on REmbeddedPostgres by
+ * Based on pltcl by Jan Wieck
+ * and inspired by REmbeddedPostgres by
  * Duncan Temple Lang <duncan@research.bell-labs.com>
  * http://www.omegahat.org/RSPostgres/
  *
@@ -322,7 +321,7 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 					SET_VECTOR_ELT(rargs, 1, fldvec);
 
 					/* convert to a factor */
-					PROTECT(fldvec = callRFunction(fun, rargs));
+					PROTECT(fldvec = call_r_func(fun, rargs));
 					UNPROTECT(1);
 			}
 
