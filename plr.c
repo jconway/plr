@@ -32,7 +32,10 @@
  */
 #include "plr.h"
 #include "storage/ipc.h"
+
+#ifdef PG_VERSION_75_COMPAT
 #include "utils/typcache.h"
+#endif /* PG_VERSION_75_COMPAT */
 
 /*
  * Global data
