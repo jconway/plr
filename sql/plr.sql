@@ -31,7 +31,7 @@ create or replace function vec(float) returns text as 'c(arg1)' language 'plr';
 select vec(1.23);
 
 create or replace function reval(_text) returns text as 'eval(parse(text = arg1))' language 'plr';
-select reval('{"sd(c(1.12,1.23,1.18,1.34))"}'::text[]);
+select round(reval('{"sd(c(1.12,1.23,1.18,1.34))"}'::text[])::numeric,8);
 
 create or replace function print(text) returns text as '' language 'plr';
 select print('hello');
@@ -40,10 +40,10 @@ create or replace function cube(int) returns float as 'sq <- function(x) {return
 select cube(3);
 
 create or replace function sd(_float8) returns float as 'sd(arg1)' language 'plr';
-select sd('{1.23,1.31,1.42,1.27}'::_float8);
+select round(sd('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
 
 create or replace function sd(_float8) returns float as '' language 'plr';
-select sd('{1.23,1.31,1.42,1.27}'::_float8);
+select round(sd('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
 
 create or replace function mean(_float8) returns float as '' language 'plr';
 select mean('{1.23,1.31,1.42,1.27}'::_float8);
@@ -79,6 +79,6 @@ CREATE AGGREGATE median (sfunc = array_accum, basetype = float8, stype = _float8
 select f1, median(f2) from foo group by f1 order by f1;
 
 create or replace function r_gamma(_float8) returns float as 'gamma(arg1)' language 'plr';
-select r_gamma('{1.23,1.31,1.42,1.27}'::_float8);
+select round(r_gamma('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
 CREATE AGGREGATE gamma (sfunc = array_accum, basetype = float8, stype = _float8, finalfunc = r_gamma);
-select f1, gamma(f2) from foo group by f1 order by f1;
+select f1, round(gamma(f2)::numeric,8) from foo group by f1 order by f1;
