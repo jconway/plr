@@ -460,64 +460,84 @@ plr_trigger_handler(PG_FUNCTION_ARGS)
 		elog(ERROR, "unrecognized tg_event");
 	argnull[3] = false;
 
-	/* fifth is level trigger fired, i.e. ROW or STATEMENT */
-	if (TRIGGER_FIRED_FOR_ROW(trigdata->tg_event))
-		arg[4] = DirectFunctionCall1(textin,
-				 CStringGetDatum("ROW"));
-	else if (TRIGGER_FIRED_FOR_STATEMENT(trigdata->tg_event))
-		arg[4] = DirectFunctionCall1(textin,
-				 CStringGetDatum("STATEMENT"));
-	else
-		/* internal error */
-		elog(ERROR, "unrecognized tg_event");
-	argnull[4] = false;
-
 	/*
+	 * fifth is level trigger fired, i.e. ROW or STATEMENT
 	 * sixth is operation that fired trigger, i.e. INSERT, UPDATE, or DELETE
 	 * seventh is NEW, eigth is OLD
 	 */
-
-	if (TRIGGER_FIRED_BY_INSERT(trigdata->tg_event))
+	if (TRIGGER_FIRED_FOR_STATEMENT(trigdata->tg_event))
 	{
-		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("INSERT"));
+		arg[4] = DirectFunctionCall1(textin,
+				 CStringGetDatum("STATEMENT"));
 
-		slot = TupleDescGetSlot(tupdesc);
-		slot->val = trigdata->tg_trigtuple;
-		arg[6] = PointerGetDatum(slot);
-		argnull[6] = false;
-
-		arg[7] = (Datum) 0;
-		argnull[7] = true;
-	}
-	else if (TRIGGER_FIRED_BY_DELETE(trigdata->tg_event))
-	{
-		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("DELETE"));
+		if (TRIGGER_FIRED_BY_INSERT(trigdata->tg_event))
+			arg[5] = DirectFunctionCall1(textin, CStringGetDatum("INSERT"));
+		else if (TRIGGER_FIRED_BY_DELETE(trigdata->tg_event))
+			arg[5] = DirectFunctionCall1(textin, CStringGetDatum("DELETE"));
+		else if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event))
+			arg[5] = DirectFunctionCall1(textin, CStringGetDatum("UPDATE"));
+		else
+			/* internal error */
+			elog(ERROR, "unrecognized tg_event");
 
 		arg[6] = (Datum) 0;
 		argnull[6] = true;
 
-		slot = TupleDescGetSlot(tupdesc);
-		slot->val = trigdata->tg_trigtuple;
-		arg[7] = PointerGetDatum(slot);
-		argnull[7] = false;
+		arg[7] = (Datum) 0;
+		argnull[7] = true;
 	}
-	else if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event))
+	else if (TRIGGER_FIRED_FOR_ROW(trigdata->tg_event))
 	{
-		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("UPDATE"));
+		arg[4] = DirectFunctionCall1(textin,
+				 CStringGetDatum("ROW"));
 
-		slot = TupleDescGetSlot(tupdesc);
-		slot->val = trigdata->tg_newtuple;
-		arg[6] = PointerGetDatum(slot);
-		argnull[6] = false;
+		if (TRIGGER_FIRED_BY_INSERT(trigdata->tg_event))
+		{
+			arg[5] = DirectFunctionCall1(textin, CStringGetDatum("INSERT"));
 
-		slot = TupleDescGetSlot(tupdesc);
-		slot->val = trigdata->tg_trigtuple;
-		arg[7] = PointerGetDatum(slot);
-		argnull[7] = false;
+			slot = TupleDescGetSlot(tupdesc);
+			slot->val = trigdata->tg_trigtuple;
+			arg[6] = PointerGetDatum(slot);
+			argnull[6] = false;
+
+			arg[7] = (Datum) 0;
+			argnull[7] = true;
+		}
+		else if (TRIGGER_FIRED_BY_DELETE(trigdata->tg_event))
+		{
+			arg[5] = DirectFunctionCall1(textin, CStringGetDatum("DELETE"));
+
+			arg[6] = (Datum) 0;
+			argnull[6] = true;
+
+			slot = TupleDescGetSlot(tupdesc);
+			slot->val = trigdata->tg_trigtuple;
+			arg[7] = PointerGetDatum(slot);
+			argnull[7] = false;
+		}
+		else if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event))
+		{
+			arg[5] = DirectFunctionCall1(textin, CStringGetDatum("UPDATE"));
+
+			slot = TupleDescGetSlot(tupdesc);
+			slot->val = trigdata->tg_newtuple;
+			arg[6] = PointerGetDatum(slot);
+			argnull[6] = false;
+
+			slot = TupleDescGetSlot(tupdesc);
+			slot->val = trigdata->tg_trigtuple;
+			arg[7] = PointerGetDatum(slot);
+			argnull[7] = false;
+		}
+		else
+			/* internal error */
+			elog(ERROR, "unrecognized tg_event");
 	}
 	else
 		/* internal error */
 		elog(ERROR, "unrecognized tg_event");
+
+	argnull[4] = false;
 	argnull[5] = false;
 
 	/*

@@ -267,3 +267,97 @@ select f1[0][1][1] is null as "NULL" from (select '{{{111,112},{121,122},{131,13
 --
 create or replace function arr3d(_int4) returns int4[] as 'return(arg1)' language 'plr' WITH (isstrict);
 select arr3d('{{{111,112},{121,122},{131,132}},{{211,212},{221,222},{231,232}}}');
+
+--
+-- Trigger support tests
+--
+
+--
+-- test that NULL return value suppresses the change
+--
+create or replace function rejectfoo() returns trigger as 'return(NULL)' language plr;
+create trigger footrig before insert or update or delete on foo for each row execute procedure rejectfoo();
+select count(*) from foo;
+insert into foo values(11,'cat99',1.89);
+select count(*) from foo;
+update foo set f1 = 'zzz';
+select count(*) from foo;
+delete from foo;
+select count(*) from foo;
+drop trigger footrig on foo;
+
+--
+-- test that returning OLD/NEW as appropriate allow the change unmodified
+--
+create or replace function acceptfoo() returns trigger as '
+switch (pg.tg.op, INSERT = return(pg.tg.new), UPDATE = return(pg.tg.new), DELETE = return(pg.tg.old))
+' language plr;
+create trigger footrig before insert or update or delete on foo for each row execute procedure acceptfoo();
+select count(*) from foo;
+insert into foo values(11,'cat99',1.89);
+select count(*) from foo;
+update foo set f1 = 'zzz' where f0 = 11;
+select * from foo where f0 = 11;
+delete from foo where f0 = 11;
+select count(*) from foo;
+drop trigger footrig on foo;
+
+--
+-- test that returning modifed tuple successfully modifies the result
+--
+create or replace function modfoo() returns trigger as '
+if (pg.tg.op == "INSERT")
+{
+  retval <- pg.tg.new
+  retval$f1 <- "xxx"
+}
+if (pg.tg.op == "UPDATE")
+{
+  retval <- pg.tg.new
+  retval$f1 <- "aaa"
+}
+if (pg.tg.op == "DELETE")
+  retval <- pg.tg.old
+return(retval)
+' language plr;
+create trigger footrig before insert or update or delete on foo for each row execute procedure modfoo();
+select count(*) from foo;
+insert into foo values(11,'cat99',1.89);
+select * from foo where f0 = 11;
+update foo set f1 = 'zzz' where f0 = 11;
+select * from foo where f0 = 11;
+delete from foo where f0 = 11;
+select count(*) from foo;
+drop trigger footrig on foo;
+
+--
+-- test statement level triggers and verify all arguments come
+-- across correctly
+--
+create or replace function foonotice() returns trigger as '
+msg <- paste(pg.tg.name,pg.tg.relname,pg.tg.when,pg.tg.level,pg.tg.op,pg.args[1],pg.args[2])
+pg.thrownotice(msg)
+return(NULL)
+' language plr;
+
+create trigger footrig after insert or update or delete on foo for each row execute procedure foonotice();
+select count(*) from foo;
+insert into foo values(11,'cat99',1.89);
+select count(*) from foo;
+update foo set f1 = 'zzz' where f0 = 11;
+select * from foo where f0 = 11;
+delete from foo where f0 = 11;
+select count(*) from foo;
+drop trigger footrig on foo;
+
+create trigger footrig after insert or update or delete on foo for each statement execute procedure foonotice('hello','world');
+select count(*) from foo;
+insert into foo values(11,'cat99',1.89);
+select count(*) from foo;
+update foo set f1 = 'zzz' where f0 = 11;
+select * from foo where f0 = 11;
+delete from foo where f0 = 11;
+select count(*) from foo;
+drop trigger footrig on foo;
+
+
