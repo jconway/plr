@@ -125,10 +125,10 @@ static HTAB *plr_HashTable;
 						"VOIDOID <- as.integer(2278); " \
 						"XIDOID <- as.integer(28); "
 #define SPI_PREPARE_CMD \
-			"pg.spi.prepare <-function(sql, argtypes) " \
+			"pg.spi.prepare <-function(sql, argtypes = NA) " \
 			"{.Call(\"plr_SPI_prepare\", sql, argtypes)}"
 #define SPI_EXECP_CMD \
-			"pg.spi.execp <-function(sql, argvalues) " \
+			"pg.spi.execp <-function(sql, argvalues = NA) " \
 			"{.Call(\"plr_SPI_execp\", sql, argvalues)}"
 #define SPI_LASTOID_CMD \
 			"pg.spi.lastoid <-function() " \

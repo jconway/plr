@@ -253,16 +253,20 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	MemoryContextSwitchTo(oldcontext);
 
 	PROTECT(rsql =  AS_CHARACTER(rsql));
-	PROTECT(rargtypes = AS_INTEGER(rargtypes));
-
 	sql = CHAR(STRING_ELT(rsql, 0));
 	if (sql == NULL)
 		elog(ERROR, "plr: cannot prepare empty query");
 
+	PROTECT(rargtypes = AS_INTEGER(rargtypes));
 	if (!isVector(rargtypes) || !isInteger(rargtypes))
 		elog(ERROR, "plr: second parameter must be a vector of PostgreSQL datatypes");
 
-	nargs = length(rargtypes);
+	/* deal with case of no parameters for the prepared query */
+	if (rargtypes == R_MissingArg || INTEGER(rargtypes)[0] == NA_INTEGER)
+		nargs = 0;
+	else
+		nargs = length(rargtypes);
+
 	if (nargs < 0)	/* can this even happen?? */
 		elog(ERROR, "plr: second parameter must be a vector of PostgreSQL datatypes");
 
@@ -303,6 +307,8 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 			typinfuncs[i] = typinfunc;
 		}
 	}
+	else
+		typeids = NULL;
 
 	/* switch to SPI memory context */
 	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
@@ -420,14 +426,15 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	SEXP				result;
 	MemoryContext		oldcontext;
 
-	if (!IS_LIST(rargvalues))
-		elog(ERROR, "plr: second parameter must be a list of arguments to the prepared plan");
-
-	if (length(rargvalues) != nargs)
-		elog(ERROR, "plr: list of arguments is not the same length as that of the prepared plan");
-
 	if (nargs > 0)
 	{
+		if (!IS_LIST(rargvalues))
+			elog(ERROR, "plr: second parameter must be a list of arguments to the prepared plan");
+
+		if (length(rargvalues) != nargs)
+			elog(ERROR, "plr: list of arguments (%d) is not the same length as " \
+						"that of the prepared plan (%d)", length(rargvalues), nargs);
+
 		argvalues = (Datum *) palloc(nargs * sizeof(Datum));
 		nulls = (char *) palloc(nargs * sizeof(char));
 	}
