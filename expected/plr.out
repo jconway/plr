@@ -1,0 +1,166 @@
+--
+-- first, define the language and functions.  Turn off echoing so that expected file
+-- does not depend on contents of tablefunc.sql.
+--
+\set ECHO none
+create or replace function throw_error(text) returns text as 'pg_throw_error(arg1)' language 'plr';
+select throw_error('hello');
+NOTICE:  hello
+ throw_error 
+-------------
+ hello
+(1 row)
+
+create or replace function paste(_text,_text,text) returns text[] as 'paste(arg1,arg2, sep = arg3)' language 'plr';
+select paste('{hello, happy}','{world, birthday}',' ');
+              paste               
+----------------------------------
+ {"hello world","happy birthday"}
+(1 row)
+
+create or replace function vec(_float8) returns _float8 as 'arg1' language 'plr';
+select vec('{1.23, 1.32}'::float8[]);
+     vec     
+-------------
+ {1.23,1.32}
+(1 row)
+
+create or replace function vec(float, float) returns _float8 as 'c(arg1,arg2)' language 'plr';
+select vec(1.23, 1.32);
+     vec     
+-------------
+ {1.23,1.32}
+(1 row)
+
+create or replace function echo(text) returns text as 'print(arg1)' language 'plr';
+select echo('hello');
+ echo  
+-------
+ hello
+(1 row)
+
+create or replace function reval(text) returns text as 'eval(parse(text = arg1))' language 'plr';
+select reval('a <- sd(c(1,2,3)); b <- mean(c(1,2,3)); a + b');
+ reval 
+-------
+ 3
+(1 row)
+
+create or replace function "commandArgs"() returns text[] as '' language 'plr';
+select "commandArgs"();
+             commandArgs              
+--------------------------------------
+ {PL/R,--gui=none,--silent,--no-save}
+(1 row)
+
+create or replace function vec(float) returns text as 'c(arg1)' language 'plr';
+select vec(1.23);
+ vec  
+------
+ 1.23
+(1 row)
+
+create or replace function reval(_text) returns text as 'eval(parse(text = arg1))' language 'plr';
+select reval('{"sd(c(1.12,1.23,1.18,1.34))"}'::text[]);
+      reval       
+------------------
+ 0.09322910847298
+(1 row)
+
+create or replace function print(text) returns text as '' language 'plr';
+select print('hello');
+ print 
+-------
+ hello
+(1 row)
+
+create or replace function cube(int) returns float as 'sq <- function(x) {return(x * x)}; return(arg1 * sq(arg1))' language 'plr';
+select cube(3);
+ cube 
+------
+   27
+(1 row)
+
+create or replace function sd(_float8) returns float as 'sd(arg1)' language 'plr';
+select sd('{1.23,1.31,1.42,1.27}'::_float8);
+         sd         
+--------------------
+ 0.0818026079453868
+(1 row)
+
+create or replace function sd(_float8) returns float as '' language 'plr';
+select sd('{1.23,1.31,1.42,1.27}'::_float8);
+         sd         
+--------------------
+ 0.0818026079453868
+(1 row)
+
+create or replace function mean(_float8) returns float as '' language 'plr';
+select mean('{1.23,1.31,1.42,1.27}'::_float8);
+  mean  
+--------
+ 1.3075
+(1 row)
+
+-- generates appropriate error message
+create or replace function elog() returns text as '.C("elog", 18, "err from R")' language 'plr';
+select elog() as error;
+NOTICE:  Error in .C("elog", 18, "err from R") : C/Fortran function name not in load table
+
+ERROR:  Caught an error calling R function
+-- generates appropriate error message
+create or replace function sprintf(text,text,text) returns text as 'sprintf(arg1,arg2,arg3)' language 'plr';
+select sprintf('%s is %f feet tall', 'Sven', '7') as error;
+NOTICE:  Error in sprintf(arg1, arg2, arg3) : use format %s for character objects
+
+ERROR:  Caught an error calling R function
+-- this one works
+select sprintf('%s is %s feet tall', 'Sven', '7');
+       sprintf       
+---------------------
+ Sven is 7 feet tall
+(1 row)
+
+create table foo(f1 text, f2 float8);
+insert into foo values('cat1',1.21);
+insert into foo values('cat1',1.24);
+insert into foo values('cat1',1.18);
+insert into foo values('cat1',1.26);
+insert into foo values('cat1',1.15);
+insert into foo values('cat2',1.15);
+insert into foo values('cat2',1.26);
+insert into foo values('cat2',1.32);
+insert into foo values('cat2',1.30);
+--
+-- test aggregates
+--
+create or replace function r_median(_float8) returns float as 'median(arg1)' language 'plr';
+select r_median('{1.23,1.31,1.42,1.27}'::_float8);
+ r_median 
+----------
+     1.29
+(1 row)
+
+CREATE AGGREGATE median (sfunc = array_accum, basetype = float8, stype = _float8, finalfunc = r_median);
+select f1, median(f2) from foo group by f1 order by f1;
+  f1  | median 
+------+--------
+ cat1 |   1.21
+ cat2 |   1.28
+(2 rows)
+
+create or replace function r_gamma(_float8) returns float as 'gamma(arg1)' language 'plr';
+select r_gamma('{1.23,1.31,1.42,1.27}'::_float8);
+     r_gamma      
+------------------
+ 0.91075485637229
+(1 row)
+
+CREATE AGGREGATE gamma (sfunc = array_accum, basetype = float8, stype = _float8, finalfunc = r_gamma);
+select f1, gamma(f2) from foo group by f1 order by f1;
+  f1  |       gamma       
+------+-------------------
+ cat1 |  0.91557649300336
+ cat2 | 0.933040931107482
+(2 rows)
+
