@@ -52,13 +52,19 @@ typedef struct saved_plan_desc
 void
 throw_pg_notice(const char **msg)
 {
-	elog(NOTICE, "%s", *msg);
+	if (msg && *msg)
+		elog(NOTICE, "%s", *msg);
+	else
+		elog(NOTICE, "%s", "");
 }
 
 void
 throw_pg_error(const char **msg)
 {
-	elog(ERROR, "%s", *msg);
+	if (msg && *msg)
+		elog(ERROR, "%s", *msg);
+	else
+		elog(ERROR, "%s", "");
 }
 
 /*
