@@ -104,3 +104,81 @@ create or replace function r_gamma(_float8) returns float as 'gamma(arg1)' langu
 select round(r_gamma('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
 CREATE AGGREGATE gamma (sfunc = array_accum, basetype = float8, stype = _float8, finalfunc = r_gamma);
 select f1, round(gamma(f2)::numeric,8) from foo group by f1 order by f1;
+
+--
+-- test returning vectors, arrays, matricies, and dataframes
+-- as scalars, arrays, and records
+--
+create or replace function test_vt() returns text as 'array(1:10,c(2,5))' language 'plr';
+select test_vt();
+
+create or replace function test_vi() returns int as 'array(1:10,c(2,5))' language 'plr';
+select test_vi();
+
+create or replace function test_mt() returns text as 'as.matrix(array(1:10,c(2,5)))' language 'plr';
+select test_mt();
+
+create or replace function test_mi() returns int as 'as.matrix(array(1:10,c(2,5)))' language 'plr';
+select test_mi();
+
+create or replace function test_dt() returns text as 'as.data.frame(array(1:10,c(2,5)))' language 'plr';
+select test_dt();
+
+-- generates expected error
+create or replace function test_di() returns int as 'as.data.frame(array(1:10,c(2,5)))' language 'plr';
+select test_di() as error;
+
+create or replace function test_vta() returns text[] as 'array(1:10,c(2,5))' language 'plr';
+select test_vta();
+
+create or replace function test_via() returns int[] as 'array(1:10,c(2,5))' language 'plr';
+select test_via();
+
+create or replace function test_mta() returns text[] as 'as.matrix(array(1:10,c(2,5)))' language 'plr';
+select test_mta();
+
+create or replace function test_mia() returns int[] as 'as.matrix(array(1:10,c(2,5)))' language 'plr';
+select test_mia();
+
+create or replace function test_dia() returns int[] as 'as.data.frame(array(1:10,c(2,5)))' language 'plr';
+select test_dia();
+
+create or replace function test_dta() returns text[] as 'as.data.frame(array(1:10,c(2,5)))' language 'plr';
+select test_dta();
+
+create or replace function test_dta1() returns text[] as 'as.data.frame(array(letters[1:10], c(2,5)))' language 'plr';
+select test_dta1();
+
+create or replace function test_dta2() returns text[] as 'as.data.frame(data.frame(letters[1:10],1:10))' language 'plr';
+select test_dta2();
+
+-- generates expected error
+create or replace function test_dia1() returns int[] as 'as.data.frame(array(letters[1:10], c(2,5)))' language 'plr';
+select test_dia1() as error;
+
+create or replace function test_dtup() returns record as 'data.frame(letters[1:10],1:10)' language 'plr';
+select * from test_dtup() as t(f1 text, f2 int);
+
+create or replace function test_mtup() returns record as 'as.matrix(array(1:15,c(5,3)))' language 'plr';
+select * from test_mtup() as t(f1 int, f2 int, f3 int);
+
+create or replace function test_vtup() returns record as 'as.vector(array(1:15,c(5,3)))' language 'plr';
+select * from test_vtup() as t(f1 int);
+
+--
+-- test pg R support functions (e.g. SPI_exec)
+--
+create or replace function pg_quote_ident(text) returns text as 'pg_quote_ident(arg1)' language 'plr';
+select pg_quote_ident('Hello World');
+
+create or replace function pg_quote_literal(text) returns text as 'pg_quote_literal(arg1)' language 'plr';
+select pg_quote_literal('Hello\'World');
+
+create or replace function test_spi_t(text) returns text as 'pg_spi_exec(arg1)' language 'plr';
+select test_spi_t('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''');
+
+create or replace function test_spi_ta(text) returns text[] as 'pg_spi_exec(arg1)' language 'plr';
+select test_spi_ta('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''');
+
+create or replace function test_spi_tup(text) returns record as 'pg_spi_exec(arg1)' language 'plr';
+select * from test_spi_tup('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''') as t(typeid oid, typename name);
