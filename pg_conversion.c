@@ -211,6 +211,8 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 {
 	int			nr = ntuples;
 	int			nc = tupdesc->natts;
+	int			nc_non_dropped = 0;
+	int			df_colnum = 0;
 	int			i = 0;
 	int			j = 0;
 	Oid			element_type;
@@ -224,12 +226,19 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 	if (tuples == NULL || ntuples < 1)
 		return R_NilValue;
 
+	/* Count non-dropped attributes so we can later ignore the dropped ones */
+	for (j = 0; j < nc; j++)
+	{
+		if (!tupdesc->attrs[j]->attisdropped)
+			nc_non_dropped++;
+	}
+
 	/*
 	 * Allocate the data.frame initially as a list,
 	 * and also allocate a names vector for the column names
 	 */
-	PROTECT(result = NEW_LIST(nc));
-    PROTECT(names = NEW_CHARACTER(nc));
+	PROTECT(result = NEW_LIST(nc_non_dropped));
+    PROTECT(names = NEW_CHARACTER(nc_non_dropped));
 
 	/*
 	 * Loop by columns
@@ -244,8 +253,12 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 		FmgrInfo	outputproc;
 		char		typalign;
 
+		/* ignore dropped attributes */
+		if (tupdesc->attrs[j]->attisdropped)
+			continue;
+
 		/* set column name */
-		SET_STRING_ELT(names, j,  mkChar(SPI_fname(tupdesc, j + 1)));
+		SET_STRING_ELT(names, df_colnum, mkChar(SPI_fname(tupdesc, j + 1)));
 
 		/* get column datatype oid */
 		element_type = SPI_gettypeid(tupdesc, j + 1);
@@ -295,8 +308,9 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 			}
 		}
 
-		SET_VECTOR_ELT(result, j, fldvec);
+		SET_VECTOR_ELT(result, df_colnum, fldvec);
 		UNPROTECT(1);
+		df_colnum++;
 	}
 
 	/* attach the column names */
@@ -453,6 +467,8 @@ get_trigger_tuple(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bo
 	char		  **values;
 	HeapTuple		tuple = NULL;
 	int				i, j;
+	int				nc_dropped = 0;
+	int				df_colnum = 0;
 	SEXP			result;
 	SEXP			dfcol;
 
@@ -491,14 +507,26 @@ get_trigger_tuple(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bo
 						   "than one row")));
 
 	/*
+	 * Count number of dropped attributes so we can add them back to
+	 * the return tuple
+	 */
+	for (j = 0; j < nc; j++)
+	{
+		if (tupdesc->attrs[j]->attisdropped)
+			nc_dropped++;
+	}
+
+	/*
 	 * Check to make sure we have the same number of columns
 	 * to return as there are attributes in the return tuple.
+	 * Note that we have to account for the number of dropped
+	 * columns.
 	 *
 	 * Note we will attempt to coerce the R values into whatever
 	 * the return attribute type is and depend on the "in"
 	 * function to complain if needed.
 	 */
-	if (nc != tupdesc->natts)
+	if (nc + nc_dropped != tupdesc->natts)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
 				 errmsg("returned tuple structure does not match table " \
@@ -541,41 +569,47 @@ get_trigger_tuple(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bo
 		UNPROTECT(1);
 	}
 
-	values = (char **) palloc(nc * sizeof(char *));
-
+	values = (char **) palloc((nc + nc_dropped) * sizeof(char *));
 	for(i = 0; i < nr; i++)
 	{
-		for (j = 0; j < nc; j++)
+		for (j = 0; j < nc + nc_dropped; j++)
 		{
-			PROTECT(dfcol = VECTOR_ELT(result, j));
-
-			if(isFactor(dfcol))
-			{
-				SEXP t;
-				for (t = ATTRIB(dfcol); t != R_NilValue; t = CDR(t))
-				{
-					if(TAG(t) == R_LevelsSymbol)
-					{
-						SEXP	obj;
-						int		idx = (int) VECTOR_ELT(dfcol, i);
-
-						PROTECT(obj = CAR(t));
-						values[j] = pstrdup(CHAR(STRING_ELT(obj, idx - 1)));
-						UNPROTECT(1);
-
-						break;
-					}
-				}
-			}
+			/* insert NULL for dropped attributes */
+			if (tupdesc->attrs[j]->attisdropped)
+				values[j] = NULL;
 			else
 			{
-				if (STRING_ELT(dfcol, 0) != NA_STRING)
-					values[j] = pstrdup(CHAR(STRING_ELT(dfcol, i)));
-				else
-					values[j] = NULL;
-			}
+				PROTECT(dfcol = VECTOR_ELT(result, df_colnum));
 
-			UNPROTECT(1);
+				if(isFactor(dfcol))
+				{
+					SEXP t;
+					for (t = ATTRIB(dfcol); t != R_NilValue; t = CDR(t))
+					{
+						if(TAG(t) == R_LevelsSymbol)
+						{
+							SEXP	obj;
+							int		idx = (int) VECTOR_ELT(dfcol, i);
+
+							PROTECT(obj = CAR(t));
+							values[j] = pstrdup(CHAR(STRING_ELT(obj, idx - 1)));
+							UNPROTECT(1);
+
+							break;
+						}
+					}
+				}
+				else
+				{
+					if (STRING_ELT(dfcol, 0) != NA_STRING)
+						values[j] = pstrdup(CHAR(STRING_ELT(dfcol, i)));
+					else
+						values[j] = NULL;
+				}
+
+				UNPROTECT(1);
+				df_colnum++;
+			}
 		}
 
 		/* construct the tuple */
