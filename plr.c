@@ -156,12 +156,21 @@ typedef struct plr_proc_desc
 	TransactionId fn_xmin;
 	CommandId	fn_cmin;
 	bool		lanpltrusted;
+	Oid			result_typid;
 	FmgrInfo	result_in_func;
-	Oid			result_in_elem;
+	Oid			result_elem;
+	FmgrInfo	result_elem_in_func;
+	int			result_elem_typlen;
+	bool		result_elem_typbyval;
+	char		result_elem_typalign;
 	int			nargs;
+	Oid			arg_typid[FUNC_MAX_ARGS];
 	FmgrInfo	arg_out_func[FUNC_MAX_ARGS];
-	Oid			arg_type[FUNC_MAX_ARGS];
 	Oid			arg_elem[FUNC_MAX_ARGS];
+	FmgrInfo	arg_elem_out_func[FUNC_MAX_ARGS];
+	int			arg_elem_typlen[FUNC_MAX_ARGS];
+	bool		arg_elem_typbyval[FUNC_MAX_ARGS];
+	char		arg_elem_typalign[FUNC_MAX_ARGS];
 	int			arg_is_rel[FUNC_MAX_ARGS];
 	SEXP		fun;	/* compiled R function */
 	SEXP		args;	/* converted args */
@@ -188,10 +197,10 @@ static plr_proc_desc *GetProdescByName(char *name);
 static SEXP plr_parseFunctionBody(const char *body);
 static SEXP callRFunction(SEXP fun, SEXP rargs);
 static SEXP plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo);
-static SEXP pg_get_r(Datum dvalue, FmgrInfo arg_out_func, Oid arg_type, Oid arg_elem);
+static SEXP pg_get_r(plr_proc_desc *prodesc, FunctionCallInfo fcinfo, int idx);
 static void pg_get_one_r(char *value, Oid arg_out_fn_oid, SEXP *obj, int elnum);
 static void get_r_vector(Oid typtype, SEXP *obj, int numels);
-static Datum r_get_pg(SEXP rval, FmgrInfo arg_in_func, Oid arg_in_elem);
+static Datum r_get_pg(SEXP rval, plr_proc_desc *prodesc);
 static SEXP pg_get_r_tuple(TupleDesc desc, HeapTuple tuple, Relation relation);
 static void system_cache_lookup(Oid element_type, bool input, int *typlen,
 					bool *typbyval, char *typdelim, Oid *typelem,
@@ -202,6 +211,17 @@ static void system_cache_lookup(Oid element_type, bool input, int *typlen,
  */
 extern int Rf_initEmbeddedR(int argc, char **argv);
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
+extern void throw_pg_error(const char **msg);
+
+/*
+ * See the no-exported header file ${R_HOME}/src/include/Parse.h
+ */
+extern SEXP R_ParseVector(SEXP, int, int *);
+#define PARSE_NULL			0
+#define PARSE_OK			1
+#define PARSE_INCOMPLETE	2
+#define PARSE_ERROR			3
+#define PARSE_EOF			4
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -278,15 +298,52 @@ plr_init_interp(void)
 {
 	int			argc;
 	char	   *argv[] = {"PL/R", "--gui=none", "--silent", "--no-save"};
+	SEXP		cmdSexp,
+				cmdexpr,
+				ans = R_NilValue;
+	int			i, j,
+				status;
+	char	   *cmd;
+	char	   *cmds[] =
+	{
+		/* first turn off error handling by R */
+		"options(error = expression(NULL))",
+
+		/* next load libplr; XXX - need non-hardcoded way to do this */
+		"dyn.load(\"/opt/src/pgsql/contrib/plr/libplr.so\")",
+
+		/* set up the postgres error handler in R */
+		"throw_pg_error <-function(msg) {.C(\"throw_pg_error\", as.character(msg))}",
+
+		/* now reset R to use the Postgres error handler */
+		"options(error = expression(throw_pg_error(geterrmessage())))",
+
+		/* terminate */
+		NULL
+	};
 
 	/* start EmbeddedR */
 	argc = sizeof(argv)/sizeof(argv[0]);
 	Rf_initEmbeddedR(argc, argv);
 
+	for (j = 0; (cmd = cmds[j]); j++)
+	{
+		PROTECT(cmdSexp = NEW_CHARACTER(1));
+		SET_STRING_ELT(cmdSexp, 0, COPY_TO_USER_STRING(cmd));
+		PROTECT(cmdexpr = R_ParseVector(cmdSexp, -1, &status));
+		if (status != PARSE_OK) {
+		    UNPROTECT(2);
+		    error("plr: invalid R call: %s", cmd);
+		}
+		/* Loop is needed here as EXPSEXP may be of length > 1 */
+		for(i = 0; i < length(cmdexpr); i++)
+		    ans = eval(VECTOR_ELT(cmdexpr, i), R_GlobalEnv);
+		UNPROTECT(2);
+	}
+
 	/* now install the commands for SPI support */
 
 		/* FIXME - nothing currently */
-
 }
 
 static void
@@ -358,7 +415,7 @@ plr_func_handler(PG_FUNCTION_ARGS)
 
 	/* convert the return value from an R object to a Datum */
 	if(rvalue != R_NilValue)
-		retval = r_get_pg(rvalue, prodesc->result_in_func, prodesc->result_in_elem);
+		retval = r_get_pg(rvalue, prodesc);
 	else
 	{
 		/* return NULL if R code returned undef */
@@ -517,10 +574,35 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 				elog(ERROR, "plr: return types of tuples not supported yet");
 			}
 
+			prodesc->result_typid = procStruct->prorettype;
 			perm_fmgr_info(typeStruct->typinput, &(prodesc->result_in_func));
-			prodesc->result_in_elem = typeStruct->typelem;
+			prodesc->result_elem = typeStruct->typelem;
 
 			ReleaseSysCache(typeTup);
+
+			/*
+			 * Check to see if we have an array type --
+			 * if so get it's in_func
+			 */
+			if (prodesc->result_elem != 0)
+			{
+				int			typlen;
+				bool		typbyval;
+				char		typdelim;
+				Oid			typinput,
+							typelem;
+				FmgrInfo	inputproc;
+				char		typalign;
+
+				system_cache_lookup(prodesc->result_elem, true, &typlen, &typbyval,
+									&typdelim, &typelem, &typinput, &typalign);
+				perm_fmgr_info(typinput, &inputproc);
+
+				prodesc->result_elem_in_func = inputproc;
+				prodesc->result_elem_typbyval = typbyval;
+				prodesc->result_elem_typlen = typlen;
+				prodesc->result_elem_typalign = typalign;
+			}
 		}
 
 		/*
@@ -558,8 +640,8 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 				else
 					prodesc->arg_is_rel[i] = 0;
 
+				prodesc->arg_typid[i] = procStruct->proargtypes[i];
 				perm_fmgr_info(typeStruct->typoutput, &(prodesc->arg_out_func[i]));
-				prodesc->arg_type[i] = procStruct->proargtypes[i];
 				prodesc->arg_elem[i] = typeStruct->typelem;
 
 				if (i > 0)
@@ -567,6 +649,27 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 				appendStringInfo(proc_internal_args, "arg%d", i + 1);
 
 				ReleaseSysCache(typeTup);
+
+
+				if (prodesc->arg_elem[i] != 0)
+				{
+					int			typlen;
+					bool		typbyval;
+					char		typdelim;
+					Oid			typoutput,
+								typelem;
+					FmgrInfo	outputproc;
+					char		typalign;
+
+					system_cache_lookup(prodesc->arg_elem[i], false, &typlen, &typbyval,
+										&typdelim, &typelem, &typoutput, &typalign);
+					perm_fmgr_info(typoutput, &outputproc);
+
+					prodesc->arg_elem_out_func[i] = outputproc;
+					prodesc->arg_elem_typbyval[i] = typbyval;
+					prodesc->arg_elem_typlen[i] = typlen;
+					prodesc->arg_elem_typalign[i] = typalign;
+				}
 			}
 		}
 		else
@@ -620,15 +723,9 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 
 		/* parse or find the R function */
 		if(proc_source && proc_source[0])
-		{
-elog(NOTICE, "parse: %s", proc_internal_def->data);
 			prodesc->fun = plr_parseFunctionBody(proc_internal_def->data);
-		}
 		else
-		{
-elog(NOTICE, "found: %s", proc_internal_def->data);
 			prodesc->fun = Rf_findFun(Rf_install(proname), R_GlobalEnv);
-		}
 
 		pfree(proc_source);
 		freeStringInfo(proc_internal_def);
@@ -671,20 +768,20 @@ GetProdescByName(char *name)
 static SEXP
 plr_parseFunctionBody(const char *body)
 {
-	SEXP	args;
 	SEXP	txt;
 	SEXP	fun;
-/*Rf_parse*/
-	PROTECT(fun = Rf_findFun(Rf_install("parsePostgresFunction"), R_GlobalEnv));
-	PROTECT(txt = NEW_CHARACTER(1));
+	int		status;
 
+	PROTECT(txt = NEW_CHARACTER(1));
 	SET_STRING_ELT(txt, 0, COPY_TO_USER_STRING(body));
-	PROTECT(args = NEW_LIST(1));
-	SET_VECTOR_ELT(args, 0, txt);
-	fun = callRFunction(fun, args);
+
+	PROTECT(fun = VECTOR_ELT(R_ParseVector(txt, -1, &status), 0));
+	if (status != PARSE_OK) {
+	    UNPROTECT(2);
+		elog(ERROR, "plr: R parse error");
+	}
 
 	UNPROTECT(2);
-
 	return(fun);
 }
 
@@ -745,10 +842,7 @@ plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 	 */
 	for (i = 0; i < prodesc->nargs; i++)
 	{
-		el = pg_get_r(fcinfo->arg[i],
-					  prodesc->arg_out_func[i],
-					  prodesc->arg_type[i],
-					  prodesc->arg_elem[i]);
+		el = pg_get_r(prodesc, fcinfo, i);
 		SET_VECTOR_ELT(rargs, i, el);
 	}
 
@@ -761,14 +855,14 @@ plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
  * given a pg value, convert to its R value representation
  */
 static SEXP
-pg_get_r(Datum dvalue, FmgrInfo arg_out_func, Oid arg_type, Oid arg_elem)
+pg_get_r(plr_proc_desc *prodesc, FunctionCallInfo fcinfo, int idx)
 {
-	SEXP	obj = NULL;
-	char   *value;
-
-elog(NOTICE, "arg_out_func.fn_oid = %u", arg_out_func.fn_oid);
-elog(NOTICE, "arg_type = %u", arg_type);
-elog(NOTICE, "arg_elem = %u", arg_elem);
+	Datum		dvalue = fcinfo->arg[idx];
+	Oid			arg_typid = prodesc->arg_typid[idx];
+	FmgrInfo	arg_out_func = prodesc->arg_out_func[idx];
+	Oid			arg_elem = prodesc->arg_elem[idx];
+	SEXP		obj = NULL;
+	char	   *value;
 
 	PROTECT(obj);
 
@@ -786,10 +880,10 @@ elog(NOTICE, "arg_elem = %u", arg_elem);
 		if (value != NULL)
 		{
 			/* get new vector of the appropriate type, length 1 */
-			get_r_vector(arg_type, &obj, 1);
+			get_r_vector(arg_typid, &obj, 1);
 
 			/* add our value to it */
-			pg_get_one_r(value, arg_type, &obj, 0);
+			pg_get_one_r(value, arg_typid, &obj, 0);
 		}
 		else
 		{
@@ -805,18 +899,15 @@ elog(NOTICE, "arg_elem = %u", arg_elem);
 		 */
 		ArrayType  *v = (ArrayType *) dvalue;
 		Oid			element_type;
-		int			typlen;
-		bool		typbyval;
-		char		typdelim;
-		Oid			typoutput,
-					typelem;
-		FmgrInfo	outputproc;
-		char		typalign;
 		int			i,
 					nitems,
 					ndim,
 				   *dim;
 		char	   *p;
+		FmgrInfo	out_func = prodesc->arg_elem_out_func[idx];
+		int			typlen = prodesc->arg_elem_typlen[idx];
+		bool		typbyval = prodesc->arg_elem_typbyval[idx];
+		char		typalign = prodesc->arg_elem_typalign[idx];
 
 		/* only support one-dim arrays for the moment */
 		ndim = ARR_NDIM(v);
@@ -824,9 +915,9 @@ elog(NOTICE, "arg_elem = %u", arg_elem);
 			elog(ERROR, "plr: multiple dimension arrays are not yet supported");
 
 		element_type = ARR_ELEMTYPE(v);
-		system_cache_lookup(element_type, false, &typlen, &typbyval,
-							&typdelim, &typelem, &typoutput, &typalign);
-		fmgr_info(typoutput, &outputproc);
+		/* sanity check */
+		if (element_type != arg_elem)
+			elog(ERROR, "plr: declared and actual types for array elements do not match");
 
 		dim = ARR_DIMS(v);
 		nitems = ArrayGetNItems(ndim, dim);
@@ -851,15 +942,15 @@ elog(NOTICE, "arg_elem = %u", arg_elem);
 			Datum		itemvalue;
 
 			itemvalue = fetch_att(p, typbyval, typlen);
-			value = DatumGetCString(FunctionCall3(&outputproc,
+			value = DatumGetCString(FunctionCall3(&out_func,
 													  itemvalue,
-												   ObjectIdGetDatum(typelem),
+													  (Datum) 0,
 													  Int32GetDatum(-1)));
 			p = att_addlength(p, typlen, PointerGetDatum(p));
 			p = (char *) att_align(p, typalign);
 
 			if (value != NULL)
-				pg_get_one_r(value, arg_type, &obj, i);
+				pg_get_one_r(value, arg_elem, &obj, i);
 			else
 				SET_STRING_ELT(obj, i, NA_STRING);
 		}
@@ -941,27 +1032,75 @@ pg_get_one_r(char *value, Oid typtype, SEXP *obj, int elnum)
  * given an R value, convert to its pg representation
  */
 static Datum
-r_get_pg(SEXP rval, FmgrInfo arg_in_func, Oid arg_in_elem)
+r_get_pg(SEXP rval, plr_proc_desc *prodesc)
 {
-	SEXP	obj = NULL;
-	Datum	dvalue;
-	char   *value;
+	SEXP		obj = NULL;
+	Datum		dvalue;
+	char	   *value;
+	FmgrInfo	result_in_func = prodesc->result_in_func;
+	Oid			result_elem = prodesc->result_elem;
 
-	PROTECT(obj);
+	if (result_elem == 0)
+	{
+		/*
+		 * if the element type is zero, we don't have an array,
+		 * so just convert as a scalar value
+		 */
+		PROTECT(obj);
 
-	obj =  AS_CHARACTER(rval);
-	value = CHAR(STRING_ELT(obj, 0));
-elog(NOTICE, "rvalue = %s", value);
+		obj =  AS_CHARACTER(rval);
+		value = CHAR(STRING_ELT(obj, 0));
 
-	if (value != NULL)
-		dvalue = FunctionCall3(&arg_in_func,
-								CStringGetDatum(value),
-								ObjectIdGetDatum(arg_in_elem),
-								Int32GetDatum(-1));
+		if (value != NULL)
+			dvalue = FunctionCall3(&result_in_func,
+									CStringGetDatum(value),
+									ObjectIdGetDatum(result_elem),
+									Int32GetDatum(-1));
+		else
+			dvalue = (Datum) 0;
+
+		UNPROTECT(1);
+	}
 	else
-		dvalue = (Datum) 0;
+	{
+		FmgrInfo	in_func = prodesc->result_elem_in_func;
+		int			typlen = prodesc->result_elem_typlen;
+		bool		typbyval = prodesc->result_elem_typbyval;
+		char		typalign = prodesc->result_elem_typalign;
+		int			i;
+		int			objlen;
+		Datum	   *dvalues;
+		ArrayType  *array;
 
-	UNPROTECT(1);
+		objlen = length(rval);
+
+		if (objlen > 0)
+		{
+			dvalues = (Datum *) palloc(objlen * sizeof(Datum));
+			PROTECT(obj =  AS_CHARACTER(rval));
+
+			/* Loop is needed here as result value might be of length > 1 */
+			for(i = 0; i < objlen; i++)
+			{
+				value = CHAR(STRING_ELT(obj, i));
+	
+				if (value != NULL)
+					dvalues[i] = FunctionCall3(&in_func,
+											CStringGetDatum(value),
+											(Datum) 0,
+											Int32GetDatum(-1));
+				else
+					dvalues[i] = (Datum) 0;
+		    }
+			UNPROTECT(1);
+
+			/* build up array */
+			array = construct_array(dvalues, objlen, result_elem, typlen, typbyval, typalign);
+			dvalue = PointerGetDatum(array);
+		}
+		else
+			dvalue = (Datum) 0;
+	}
 
 	return dvalue;
 }
@@ -1017,4 +1156,10 @@ system_cache_lookup(Oid element_type,
 	else
 		*proc = typeStruct->typoutput;
 	ReleaseSysCache(typeTuple);
+}
+
+void
+throw_pg_error(const char **msg)
+{
+	elog(NOTICE, "%s", *msg);
 }
