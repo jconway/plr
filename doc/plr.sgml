@@ -891,6 +891,16 @@ select plr_array_accum('{23,35}', 42);
      </varlistentry>
 
      <varlistentry>
+      <term><function>load_r_typenames</function>()</term>
+      <listitem>
+       <para>
+        Installs datatype Oid variables into the R interpreter
+        as globals. See also <function>r_typenames</function> below.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
       <term><function>r_typenames</function>()</term>
       <listitem>
        <para>
@@ -1136,7 +1146,7 @@ select pg_test_module_load('hello world');
       </varlistentry>
 
       <varlistentry>
-       <term><varname>pg.tg.new</varname></term>
+       <term><varname>pg.tg.old</varname></term>
        <listitem>
 	<para>
      When the trigger is defined <command>FOR EACH ROW</>, 
