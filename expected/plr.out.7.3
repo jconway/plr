@@ -774,6 +774,7 @@ select count(*) from foo;
 
 drop trigger footrig on foo;
 create trigger footrig after insert or update or delete on foo for each statement execute procedure foonotice('hello','world');
+ERROR:  CreateTrigger: STATEMENT triggers are unimplemented, yet
 select count(*) from foo;
  count 
 -------
@@ -781,7 +782,6 @@ select count(*) from foo;
 (1 row)
 
 insert into foo values(11,'cat99',1.89);
-NOTICE:  footrig foo AFTER STATEMENT INSERT hello world
 select count(*) from foo;
  count 
 -------
@@ -789,7 +789,6 @@ select count(*) from foo;
 (1 row)
 
 update foo set f1 = 'zzz' where f0 = 11;
-NOTICE:  footrig foo AFTER STATEMENT UPDATE hello world
 select * from foo where f0 = 11;
  f0 | f1  |  f2  
 ----+-----+------
@@ -797,7 +796,6 @@ select * from foo where f0 = 11;
 (1 row)
 
 delete from foo where f0 = 11;
-NOTICE:  footrig foo AFTER STATEMENT DELETE hello world
 select count(*) from foo;
  count 
 -------
@@ -805,3 +803,4 @@ select count(*) from foo;
 (1 row)
 
 drop trigger footrig on foo;
+ERROR:  DropTrigger: there is no trigger footrig on relation foo
