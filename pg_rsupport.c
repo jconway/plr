@@ -134,6 +134,7 @@ plr_SPI_exec(SEXP rsql)
 	int				ntuples;
 	SEXP			result = NULL;
 	MemoryContext	oldcontext;
+	sigjmp_buf		save_restart;
 	ERRORCONTEXTCALLBACK;
 
 	/* set up error context */
@@ -142,12 +143,22 @@ plr_SPI_exec(SEXP rsql)
 	PROTECT(rsql =  AS_CHARACTER(rsql));
 	sql = CHAR(STRING_ELT(rsql, 0));
 	if (sql == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("cannot exec empty query")));
+		error("%s", "cannot exec empty query");
 
 	/* switch to SPI memory context */
 	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+
+	/*
+	 * trap elog/ereport so we can let R finish up gracefully
+	 * and generate the error once we exit the interpreter
+	 */
+	memcpy(&save_restart, &Warn_restart, sizeof(save_restart));
+	if (sigsetjmp(Warn_restart, 1) != 0)
+	{
+		InError = false;
+		memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
+		error("%s", "error executing SQL statement");
+	}
 
 	/* Execute the query and handle return codes */
 	spi_rc = SPI_exec(sql, count);
@@ -184,26 +195,25 @@ plr_SPI_exec(SEXP rsql)
 			break;
 
 		case SPI_ERROR_ARGUMENT:
-			elog(ERROR, "SPI_exec() failed - SPI_ERROR_ARGUMENT");
+			error("SPI_exec() failed: SPI_ERROR_ARGUMENT");
 
 		case SPI_ERROR_UNCONNECTED:
-			elog(ERROR, "SPI_exec() failed - SPI_ERROR_UNCONNECTED");
+			error("SPI_exec() failed: SPI_ERROR_UNCONNECTED");
 
 		case SPI_ERROR_COPY:
-			elog(ERROR, "SPI_exec() failed - SPI_ERROR_COPY");
+			error("SPI_exec() failed: SPI_ERROR_COPY");
 
 		case SPI_ERROR_CURSOR:
-			elog(ERROR, "SPI_exec() failed - SPI_ERROR_CURSOR");
+			error("SPI_exec() failed: SPI_ERROR_CURSOR");
 
 		case SPI_ERROR_TRANSACTION:
-			elog(ERROR, "SPI_exec() failed - SPI_ERROR_TRANSACTION");
+			error("SPI_exec() failed: SPI_ERROR_TRANSACTION");
 
 		case SPI_ERROR_OPUNKNOWN:
-			elog(ERROR, "SPI_exec() failed - SPI_ERROR_OPUNKNOWN");
+			error("SPI_exec() failed: SPI_ERROR_OPUNKNOWN");
 
 		default:
-			snprintf(buf, sizeof(buf), "%d", spi_rc);
-			elog(ERROR, "SPI_exec() failed - unknown RC");
+			error("SPI_exec() failed: %d", spi_rc);
 	}
 
 	/*
@@ -220,6 +230,9 @@ plr_SPI_exec(SEXP rsql)
 		result = R_NilValue;
 
 	POP_PLERRCONTEXT;
+
+	/* restore normal error handling */
+	memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
 
 	return result;
 }
@@ -265,6 +278,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	saved_plan_desc	   *plan_desc;
 	SEXP				result;
 	MemoryContext		oldcontext;
+	sigjmp_buf			save_restart;
 	ERRORCONTEXTCALLBACK;
 
 	/* set up error context */
@@ -280,16 +294,11 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	PROTECT(rsql =  AS_CHARACTER(rsql));
 	sql = CHAR(STRING_ELT(rsql, 0));
 	if (sql == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("cannot prepare empty query")));
+		error("%s", "cannot prepare empty query");
 
 	PROTECT(rargtypes = AS_INTEGER(rargtypes));
 	if (!isVector(rargtypes) || !isInteger(rargtypes))
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("second parameter must be a vector of PostgreSQL " \
-						"datatypes")));
+		error("%s", "second parameter must be a vector of PostgreSQL datatypes");
 
 	/* deal with case of no parameters for the prepared query */
 	if (rargtypes == R_MissingArg || INTEGER(rargtypes)[0] == NA_INTEGER)
@@ -298,10 +307,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 		nargs = length(rargtypes);
 
 	if (nargs < 0)	/* can this even happen?? */
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("second parameter must be a vector of PostgreSQL " \
-						"datatypes")));
+		error("%s", "second parameter must be a vector of PostgreSQL datatypes");
 
 	if (nargs > 0)
 	{
@@ -345,6 +351,18 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 
 	/* switch to SPI memory context */
 	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+
+	/*
+	 * trap elog/ereport so we can let R finish up gracefully
+	 * and generate the error once we exit the interpreter
+	 */
+	memcpy(&save_restart, &Warn_restart, sizeof(save_restart));
+	if (sigsetjmp(Warn_restart, 1) != 0)
+	{
+		InError = false;
+		memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
+		error("%s", "error preparing SQL statement");
+	}
 
 	/* Prepare plan for query */
 	pplan = SPI_prepare(sql, nargs, typeids);
@@ -390,7 +408,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 		}
 
 		/* internal error */
-		elog(ERROR, "SPI_prepare failed - %s", reason);
+		error("SPI_prepare() failed: %s", reason);
 	}
 
 	/* SPI_saveplan already uses TopMemoryContext */
@@ -418,7 +436,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 		}
 
 		/* internal error */
-		elog(ERROR, "SPI_saveplan failed - %s", reason);
+		error("SPI_saveplan() failed: %s", reason);
 	}
 
 	/* back to caller's memory context */
@@ -436,6 +454,9 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	result = R_MakeExternalPtr(plan_desc, R_NilValue, R_NilValue);
 
 	POP_PLERRCONTEXT;
+
+	/* restore normal error handling */
+	memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
 
 	return result;
 }
@@ -462,6 +483,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	int					ntuples;
 	SEXP				result;
 	MemoryContext		oldcontext;
+	sigjmp_buf			save_restart;
 	ERRORCONTEXTCALLBACK;
 
 	/* set up error context */
@@ -470,17 +492,13 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	if (nargs > 0)
 	{
 		if (!IS_LIST(rargvalues))
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("second parameter must be a list of arguments " \
-							"to the prepared plan")));
+			error("%s", "second parameter must be a list of arguments " \
+						"to the prepared plan");
 
 		if (length(rargvalues) != nargs)
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("list of arguments (%d) is not the same length " \
-							"as that of the prepared plan (%d)",
-							length(rargvalues), nargs)));
+			error("list of arguments (%d) is not the same length " \
+				  "as that of the prepared plan (%d)",
+				  length(rargvalues), nargs);
 
 		argvalues = (Datum *) palloc(nargs * sizeof(Datum));
 		nulls = (char *) palloc(nargs * sizeof(char));
@@ -501,6 +519,18 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 
 	/* switch to SPI memory context */
 	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+
+	/*
+	 * trap elog/ereport so we can let R finish up gracefully
+	 * and generate the error once we exit the interpreter
+	 */
+	memcpy(&save_restart, &Warn_restart, sizeof(save_restart));
+	if (sigsetjmp(Warn_restart, 1) != 0)
+	{
+		InError = false;
+		memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
+		error("%s", "error executing saved plan");
+	}
 
 	/* Execute the plan */
 	spi_rc = SPI_execp(saved_plan, argvalues, nulls, count);
@@ -538,26 +568,25 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 			break;
 
 		case SPI_ERROR_ARGUMENT:
-			elog(ERROR, "SPI_execp() failed - SPI_ERROR_ARGUMENT");
+			error("SPI_execp() failed: SPI_ERROR_ARGUMENT");
 
 		case SPI_ERROR_UNCONNECTED:
-			elog(ERROR, "SPI_execp() failed - SPI_ERROR_UNCONNECTED");
+			error("SPI_execp() failed: SPI_ERROR_UNCONNECTED");
 
 		case SPI_ERROR_COPY:
-			elog(ERROR, "SPI_execp() failed - SPI_ERROR_COPY");
+			error("SPI_execp() failed: SPI_ERROR_COPY");
 
 		case SPI_ERROR_CURSOR:
-			elog(ERROR, "SPI_execp() failed - SPI_ERROR_CURSOR");
+			error("SPI_execp() failed: SPI_ERROR_CURSOR");
 
 		case SPI_ERROR_TRANSACTION:
-			elog(ERROR, "SPI_execp() failed - SPI_ERROR_TRANSACTION");
+			error("SPI_execp() failed: SPI_ERROR_TRANSACTION");
 
 		case SPI_ERROR_OPUNKNOWN:
-			elog(ERROR, "SPI_execp() failed - SPI_ERROR_OPUNKNOWN");
+			error("SPI_execp() failed: SPI_ERROR_OPUNKNOWN");
 
 		default:
-			snprintf(buf, sizeof(buf), "%d", spi_rc);
-			elog(ERROR, "SPI_execp() failed - unknown RC");
+			error("SPI_execp() failed: %d", spi_rc);
 	}
 
 	/*
@@ -574,6 +603,9 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 		result = R_NilValue;
 
 	POP_PLERRCONTEXT;
+
+	/* restore normal error handling */
+	memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
 
 	return result;
 }
