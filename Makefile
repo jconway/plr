@@ -31,9 +31,17 @@ SHLIB_LINK	+= -L$(r_libdir) -lR
 DATA_built	:= plr.sql 
 DOCS		:= README.plr
 REGRESS		:= plr
-EXTRA_CLEAN	:= doc/HTML.index
+EXTRA_CLEAN	:= doc/HTML.index expected/plr.out
 
 include $(top_srcdir)/contrib/contrib-global.mk
+
+installcheck: submake
+ifeq ($(findstring 7.3,$(VERSION)),7.3)
+	cp -f $(top_builddir)/$(subdir)/expected/plr.out.7.3 $(top_builddir)/$(subdir)/expected/plr.out
+else
+	cp -f $(top_builddir)/$(subdir)/expected/plr.out.7.4 $(top_builddir)/$(subdir)/expected/plr.out
+endif
+	$(top_builddir)/src/test/regress/pg_regress $(REGRESS)
 
 else # can't build
 

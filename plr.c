@@ -163,7 +163,10 @@ static plr_function *do_compile(FunctionCallInfo fcinfo,
 							    plr_func_hashkey *hashkey);
 static SEXP plr_parse_func_body(const char *body);
 static SEXP plr_convertargs(plr_function *function, FunctionCallInfo fcinfo);
+
+#ifndef PG_VERSION_73_COMPAT
 static void plr_error_callback(void *arg);
+#endif
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -985,6 +988,8 @@ plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
 	return(rargs);
 }
 
+#ifndef PG_VERSION_73_COMPAT
+
 /*
  * error context callback to let us supply a call-stack traceback
  */
@@ -994,3 +999,5 @@ plr_error_callback(void *arg)
 	if (arg)
 		errcontext("In PL/R function %s", (char *) arg);
 }
+
+#endif /* not PG_VERSION_73_COMPAT */

@@ -146,6 +146,17 @@ extern SEXP R_ParseVector(SEXP, int, int *);
  * working with postgres 7.3 compatible sources
  *************************************************************************/
 
+/* I/O function selector for get_type_io_data */
+typedef enum IOFuncSelector
+{
+	IOFunc_input,
+	IOFunc_output,
+	IOFunc_receive,
+	IOFunc_send
+} IOFuncSelector;
+
+#define ANYELEMENTOID	2283
+
 #define INIT_FINFO_FUNCEXPR
 #define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, SortMem)
 #define INIT_AUX_FMGR_ATTS \
@@ -156,7 +167,7 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 #define palloc0(sz_)	palloc(sz_)
 
 #define ERRORCONTEXTCALLBACK
-#define PUSH_PLERRCONTEXT
+#define PUSH_PLERRCONTEXT(_error_callback_, _plr_error_funcname_)
 #define POP_PLERRCONTEXT
 #define SAVE_PLERRCONTEXT
 #define RESTORE_PLERRCONTEXT
@@ -319,7 +330,6 @@ extern void R_ReleaseObject(SEXP);
 extern ArrayType *construct_md_array(Datum *elems, int ndims, int *dims,
 									 int *lbs, Oid elmtype, int elmlen,
 									 bool elmbyval, char elmalign);
-extern Oid get_fn_expr_rettype(FunctionCallInfo fcinfo);
 extern Oid get_element_type(Oid typid);
 extern Oid get_array_type(Oid typid);
 extern void get_type_io_data(Oid typid, IOFuncSelector which_func,

@@ -58,7 +58,6 @@ static bool file_exists(const char *name);
 /*************************************************************************
  * working with postgres 7.3 compatible sources
  *************************************************************************/
-
 ArrayType *
 construct_md_array(Datum *elems,
 				   int ndims,
@@ -94,16 +93,6 @@ construct_md_array(Datum *elems,
 	}
 
 	return array;
-}
-
-Oid
-get_fn_expr_rettype(FunctionCallInfo fcinfo)
-{
-	/* can't return anything useful if we have no FmgrInfo */
-	if (fcinfo->flinfo == NULL)
-		return InvalidOid;
-	
-	return get_func_rettype(fcinfo->flinfo->fn_oid);
 }
 
 /*
@@ -227,12 +216,9 @@ get_type_io_data(Oid typid,
 		case IOFunc_output:
 			*func = typeStruct->typoutput;
 			break;
-		case IOFunc_receive:
-			*func = typeStruct->typreceive;
-			break;
-		case IOFunc_send:
-			*func = typeStruct->typsend;
-			break;
+		default:
+			/* should never happen */
+			elog(ERROR, "get_type_io_data called with invalid IO function selector");
 	}
 	ReleaseSysCache(typeTuple);
 }

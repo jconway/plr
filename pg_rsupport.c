@@ -35,7 +35,10 @@
 extern MemoryContext plr_SPI_context;
 
 static SEXP rpgsql_get_results(int ntuples, SPITupleTable *tuptable);
+
+#ifndef PG_VERSION_73_COMPAT
 static void rsupport_error_callback(void *arg);
+#endif
 
 /* The information we cache prepared plans */
 typedef struct saved_plan_desc
@@ -590,6 +593,8 @@ plr_SPI_lastoid(void)
 	return result;
 }
 
+#ifndef PG_VERSION_73_COMPAT
+
 /*
  * error context callback to let us supply a call-stack traceback
  */
@@ -599,3 +604,5 @@ rsupport_error_callback(void *arg)
 	if (arg)
 		errcontext("In R support function %s", (char *) arg);
 }
+
+#endif /* not PG_VERSION_73_COMPAT */

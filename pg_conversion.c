@@ -209,8 +209,6 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 	Oid			typelem;
 	SEXP		names;
 	SEXP		row_names;
-	SEXP		dims, frame_dims;
-	SEXP		frame_dimnames;
 	char		buf[256];
 	SEXP		result;
 	SEXP		fldvec;
@@ -313,26 +311,6 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 	    SET_STRING_ELT(row_names, i, COPY_TO_USER_STRING(buf));
 	}
 	setAttrib(result, R_RowNamesSymbol, row_names);
-
-	/* attach dimensions */
-	PROTECT(frame_dims = allocVector(INTSXP, 2));
-	/* nr doesn't work for dim[0], the frame list is only 1 row */
-	INTEGER_DATA(frame_dims)[0] = 1;
-	INTEGER_DATA(frame_dims)[1] = nc;
-	setAttrib(result, R_DimSymbol, frame_dims);
-	UNPROTECT(1);
-
-	/* correct the number of rows */
-	PROTECT(dims = getAttrib(result, R_DimSymbol));
-	INTEGER(dims)[0] = nr;
-	UNPROTECT(1);
-
-	/* attach dimnames */
-	PROTECT(frame_dimnames = NEW_LIST(2));
-	SET_VECTOR_ELT(frame_dimnames, 0, row_names);
-	SET_VECTOR_ELT(frame_dimnames, 1, names);
-	setAttrib(result, R_DimNamesSymbol, frame_dimnames);
-	UNPROTECT(1);
 
 	/* finally, tell R we are a "data.frame" */
     setAttrib(result, R_ClassSymbol, mkString("data.frame"));
