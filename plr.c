@@ -48,83 +48,88 @@ static HTAB *plr_HashTable;
 #define FUNCS_PER_USER		64
 #define OPTIONS_NULL_CMD	"options(error = expression(NULL))"
 #define THROWERROR_CMD \
-			"pg_throw_error <-function(msg) " \
+			"pg.throwerror <-function(msg) " \
 			"{.C(\"throw_pg_error\", as.character(msg))}"
 #define OPTIONS_THROWERROR_CMD \
-			"options(error = expression(pg_throw_error(geterrmessage())))"
+			"options(error = expression(pg.throwerror(geterrmessage())))"
 #define QUOTE_LITERAL_CMD \
-			"pg_quote_literal <-function(sql) " \
+			"pg.quoteliteral <-function(sql) " \
 			"{.Call(\"plr_quote_literal\", sql)}"
 #define QUOTE_IDENT_CMD \
-			"pg_quote_ident <-function(sql) " \
+			"pg.quoteident <-function(sql) " \
 			"{.Call(\"plr_quote_ident\", sql)}"
 #define SPI_EXEC_CMD \
-			"pg_spi_exec <-function(sql) {.Call(\"plr_SPI_exec\", sql)}"
-#define TYPEOIDS_CMD 	"ABSTIMEOID <- 702; " \
-						"ACLITEMOID <- 1033; " \
-						"ANYARRAYOID <- 2277; " \
-						"ANYOID <- 2276; " \
-						"BITOID <- 1560; " \
-						"BOOLOID <- 16; " \
-						"BOXOID <- 603; " \
-						"BPCHAROID <- 1042; " \
-						"BYTEAOID <- 17; " \
-						"CASHOID <- 790; " \
-						"CHAROID <- 18; " \
-						"CIDOID <- 29; " \
-						"CIDROID <- 650; " \
-						"CIRCLEOID <- 718; " \
-						"CSTRINGOID <- 2275; " \
-						"DATEOID <- 1082; " \
-						"FLOAT4OID <- 700; " \
-						"FLOAT8OID <- 701; " \
-						"INETOID <- 869; " \
-						"INT2OID <- 21; " \
-						"INT2VECTOROID <- 22; " \
-						"INT4OID <- 23; " \
-						"INT8OID <- 20; " \
-						"INTERNALOID <- 2281; " \
-						"INTERVALOID <- 1186; " \
-						"LANGUAGE_HANDLEROID <- 2280; " \
-						"LINEOID <- 628; " \
-						"LSEGOID <- 601; " \
-						"MACADDROID <- 829; " \
-						"NAMEOID <- 19; " \
-						"NUMERICOID <- 1700; " \
-						"OIDOID <- 26; " \
-						"OIDVECTOROID <- 30; " \
-						"OPAQUEOID <- 2282; " \
-						"PATHOID <- 602; " \
-						"POINTOID <- 600; " \
-						"POLYGONOID <- 604; " \
-						"RECORDOID <- 2249; " \
-						"REFCURSOROID <- 1790; " \
-						"REGCLASSOID <- 2205; " \
-						"REGOPERATOROID <- 2204; " \
-						"REGOPEROID <- 2203; " \
-						"REGPROCEDUREOID <- 2202; " \
-						"REGPROCOID <- 24; " \
-						"REGTYPEOID <- 2206; " \
-						"RELTIMEOID <- 703; " \
-						"TEXTOID <- 25; " \
-						"TIDOID <- 27; " \
-						"TIMEOID <- 1083; " \
-						"TIMESTAMPOID <- 1114; " \
-						"TIMESTAMPTZOID <- 1184; " \
-						"TIMETZOID <- 1266; " \
-						"TINTERVALOID <- 704; " \
-						"TRIGGEROID <- 2279; " \
-						"UNKNOWNOID <- 705; " \
-						"VARBITOID <- 1562; " \
-						"VARCHAROID <- 1043; " \
-						"VOIDOID <- 2278; " \
-						"XIDOID <- 28; "
+			"pg.spi.exec <-function(sql) {.Call(\"plr_SPI_exec\", sql)}"
+#define TYPEOIDS_CMD 	"ABSTIMEOID <- as.integer(702); " \
+						"ACLITEMOID <- as.integer(1033); " \
+						"ANYARRAYOID <- as.integer(2277); " \
+						"ANYOID <- as.integer(2276); " \
+						"BITOID <- as.integer(1560); " \
+						"BOOLOID <- as.integer(16); " \
+						"BOXOID <- as.integer(603); " \
+						"BPCHAROID <- as.integer(1042); " \
+						"BYTEAOID <- as.integer(17); " \
+						"CASHOID <- as.integer(790); " \
+						"CHAROID <- as.integer(18); " \
+						"CIDOID <- as.integer(29); " \
+						"CIDROID <- as.integer(650); " \
+						"CIRCLEOID <- as.integer(718); " \
+						"CSTRINGOID <- as.integer(2275); " \
+						"DATEOID <- as.integer(1082); " \
+						"FLOAT4OID <- as.integer(700); " \
+						"FLOAT8OID <- as.integer(701); " \
+						"INETOID <- as.integer(869); " \
+						"INT2OID <- as.integer(21); " \
+						"INT2VECTOROID <- as.integer(22); " \
+						"INT4OID <- as.integer(23); " \
+						"INT8OID <- as.integer(20); " \
+						"INTERNALOID <- as.integer(2281); " \
+						"INTERVALOID <- as.integer(1186); " \
+						"LANGUAGE_HANDLEROID <- as.integer(2280); " \
+						"LINEOID <- as.integer(628); " \
+						"LSEGOID <- as.integer(601); " \
+						"MACADDROID <- as.integer(829); " \
+						"NAMEOID <- as.integer(19); " \
+						"NUMERICOID <- as.integer(1700); " \
+						"OIDOID <- as.integer(26); " \
+						"OIDVECTOROID <- as.integer(30); " \
+						"OPAQUEOID <- as.integer(2282); " \
+						"PATHOID <- as.integer(602); " \
+						"POINTOID <- as.integer(600); " \
+						"POLYGONOID <- as.integer(604); " \
+						"RECORDOID <- as.integer(2249); " \
+						"REFCURSOROID <- as.integer(1790); " \
+						"REGCLASSOID <- as.integer(2205); " \
+						"REGOPERATOROID <- as.integer(2204); " \
+						"REGOPEROID <- as.integer(2203); " \
+						"REGPROCEDUREOID <- as.integer(2202); " \
+						"REGPROCOID <- as.integer(24); " \
+						"REGTYPEOID <- as.integer(2206); " \
+						"RELTIMEOID <- as.integer(703); " \
+						"TEXTOID <- as.integer(25); " \
+						"TIDOID <- as.integer(27); " \
+						"TIMEOID <- as.integer(1083); " \
+						"TIMESTAMPOID <- as.integer(1114); " \
+						"TIMESTAMPTZOID <- as.integer(1184); " \
+						"TIMETZOID <- as.integer(1266); " \
+						"TINTERVALOID <- as.integer(704); " \
+						"TRIGGEROID <- as.integer(2279); " \
+						"UNKNOWNOID <- as.integer(705); " \
+						"VARBITOID <- as.integer(1562); " \
+						"VARCHAROID <- as.integer(1043); " \
+						"VOIDOID <- as.integer(2278); " \
+						"XIDOID <- as.integer(28); "
 #define SPI_PREPARE_CMD \
-			"pg_spi_prepare <-function(sql, argtypes) " \
+			"pg.spi.prepare <-function(sql, argtypes) " \
 			"{.Call(\"plr_SPI_prepare\", sql, argtypes)}"
 #define SPI_EXECP_CMD \
-			"pg_spi_execp <-function(sql, ...) " \
+			"pg.spi.execp <-function(sql, argvalues) " \
 			"{.Call(\"plr_SPI_execp\", sql, argvalues)}"
+#define SPI_LASTOID_CMD \
+			"pg.spi.lastoid <-function() " \
+			"{.Call(\"plr_SPI_lastoid\")}"
+#define REVAL \
+			"pg.reval <- function(arg1) {eval(parse(text = arg1))}"
 
 /* hash table support */
 #define plr_HashTableLookup(NAME, PRODESC) \
@@ -304,9 +309,11 @@ plr_init_interp(Oid funcid)
 		TYPEOIDS_CMD,
 		SPI_PREPARE_CMD,
 		SPI_EXECP_CMD,
-/*
-		"pg_spi_lastoid <-function(msg) {.C(\"plr_SPI_lastoid\", as.character(msg))}",
-*/
+		SPI_LASTOID_CMD,
+
+		/* handy predefined R functions */
+		REVAL,
+
 		/* terminate */
 		NULL
 	};
@@ -440,13 +447,12 @@ plr_func_handler(PG_FUNCTION_ARGS)
 
 	/* Find or compile the function */
 	prodesc = compile_plr_function(fcinfo->flinfo->fn_oid, false);
-	fun = prodesc->fun;
+	PROTECT(fun = prodesc->fun);
 
 	/* Convert all call arguments */
 	PROTECT(rargs = plr_convertargs(prodesc, fcinfo));
 
 	/* Call the R function */
-	PROTECT(fun);
 	PROTECT(rvalue = callRFunction(fun, rargs));
 
 	/* switch out of current memory context into the function's context */
@@ -461,14 +467,13 @@ plr_func_handler(PG_FUNCTION_ARGS)
 		retval = (Datum) 0;
 		fcinfo->isnull = true;
 	}
+	UNPROTECT(3);
 
 	/* switch back to old memory context */
 	MemoryContextSwitchTo(oldcontext);
 
 	if (SPI_finish() != SPI_OK_FINISH)
 		elog(ERROR, "plr: SPI_finish() failed");
-
-	UNPROTECT(3);
 
 	return retval;
 }

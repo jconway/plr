@@ -604,10 +604,13 @@ get_frame_tuplestore(SEXP rval,
 		elog(ERROR, "plr: bad internal representation of data.frame");
 
 	if (ATTRIB(dfcol) != R_NilValue)
+	{
+		UNPROTECT(1);
 		PROTECT(dfcol = CAR(ATTRIB(dfcol)));
+	}
 
 	nr = length(dfcol);
-	UNPROTECT(2);
+	UNPROTECT(1);
 
 	values = (char **) palloc(nc * sizeof(char *));
 

@@ -72,6 +72,21 @@
 #undef ELOG_H
 #include "utils/elog.h"
 
+#ifdef DEBUGPROTECT
+#undef PROTECT
+#define PROTECT(s) \
+	do { \
+		elog(NOTICE, "\tPROTECT\t1\t%s\t%d", __FILE__, __LINE__); \
+		protect(s); \
+	} while (0)
+#undef UNPROTECT
+#define UNPROTECT(n) \
+	do { \
+		elog(NOTICE, "\tUNPROTECT\t%d\t%s\t%d", n, __FILE__, __LINE__); \
+		unprotect(n); \
+	} while (0)
+#endif /* DEBUGPROTECT */
+
 #define xpfree(var_) \
 	do { \
 		if (var_ != NULL) \
@@ -153,6 +168,7 @@ extern SEXP plr_quote_ident(SEXP rawstr);
 extern SEXP plr_SPI_exec(SEXP rsql);
 extern SEXP plr_SPI_prepare(SEXP rsql, SEXP rargtypes);
 extern SEXP plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues);
+extern SEXP plr_SPI_lastoid(void);
 
 /* Postgres callable functions useful in conjunction with PL/R */
 extern Datum install_rcmd(PG_FUNCTION_ARGS);

@@ -390,7 +390,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	MemoryContextSwitchTo(oldcontext);
 
 	PROTECT(rsql =  AS_CHARACTER(rsql));
-	PROTECT(rargtypes);
+	PROTECT(rargtypes = AS_INTEGER(rargtypes));
 
 	sql = CHAR(STRING_ELT(rsql, 0));
 	if (sql == NULL)
@@ -424,7 +424,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 			char		typalign;
 			FmgrInfo	typinfunc;
 
-			typeids[i] = *(INTEGER(VECTOR_ELT(rargtypes, i)));
+			typeids[i] = (int) VECTOR_ELT(rargtypes, i);
 
 			/* switch to long lived context to create plan description elements */
 			oldcontext = MemoryContextSwitchTo(TopMemoryContext);
@@ -549,19 +549,21 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	int					ntuples;
 	SEXP				result;
 
-	if (!isList(rargvalues))
+	if (!IS_LIST(rargvalues))
 		elog(ERROR, "plr: second parameter must be a list of arguments to the prepared plan");
 
 	if (length(rargvalues) != nargs)
 		elog(ERROR, "plr: list of arguments is not the same length as that of the prepared plan");
 
 	if (nargs > 0)
+	{
 		argvalues = (Datum *) palloc(nargs * sizeof(Datum));
+		nulls = (char *) palloc(nargs * sizeof(char));
+	}
 
 	for (i = 0; i < nargs; i++)
 	{
-		PROTECT(obj = CAR(rargvalues));
-		PROTECT(rargvalues = CDR(rargvalues));
+		PROTECT(obj = VECTOR_ELT(rargvalues, i));
 
 		argvalues[i] = get_scalar_datum(obj, typinfuncs[i], typelems[i]);
 		if (argvalues[i] != (Datum) 0)
@@ -569,7 +571,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 		else
 			nulls[i] = 'n';
 
-		UNPROTECT(2);
+		UNPROTECT(1);
 	}
 
 	/* Execute the plan */
@@ -643,3 +645,17 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	return result;
 }
 
+/* 
+ * plr_SPI_lastoid - return the last oid. To be used after insert queries.
+ */
+SEXP
+plr_SPI_lastoid(void)
+{
+	SEXP	result;
+
+	PROTECT(result = NEW_INTEGER(1));
+	INTEGER_DATA(result)[0] = SPI_lastoid;
+	UNPROTECT(1);
+
+	return result;
+}

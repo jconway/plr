@@ -7,11 +7,11 @@ CREATE TABLE plr_modules (
   modseq int4,
   modsrc text
 );
-INSERT INTO plr_modules VALUES (0, 'pg_test_module_load <-function(msg) {print(msg)}');
+INSERT INTO plr_modules VALUES (0, 'pg.test.module.load <-function(msg) {print(msg)}');
 --
 -- plr_modules test
 --
-create or replace function pg_test_module_load(text) returns text as 'pg_test_module_load(arg1)' language 'plr';
+create or replace function pg_test_module_load(text) returns text as 'pg.test.module.load(arg1)' language 'plr';
 select pg_test_module_load('hello world');
  pg_test_module_load 
 ---------------------
@@ -21,13 +21,13 @@ select pg_test_module_load('hello world');
 --
 -- user defined R function test
 --
-select install_rcmd('pg_test_install <-function(msg) {print(msg)}');
+select install_rcmd('pg.test.install <-function(msg) {print(msg)}');
  install_rcmd 
 --------------
  OK
 (1 row)
 
-create or replace function pg_test_install(text) returns text as 'pg_test_install(arg1)' language 'plr';
+create or replace function pg_test_install(text) returns text as 'pg.test.install(arg1)' language 'plr';
 select pg_test_install('hello world');
  pg_test_install 
 -----------------
@@ -37,7 +37,7 @@ select pg_test_install('hello world');
 --
 -- a variety of plr functions
 --
-create or replace function throw_error(text) returns text as 'pg_throw_error(arg1)' language 'plr';
+create or replace function throw_error(text) returns text as 'pg.throwerror(arg1)' language 'plr';
 select throw_error('hello');
 NOTICE:  hello
  throw_error 
@@ -406,39 +406,68 @@ select * from test_vtup1();
 --
 -- test pg R support functions (e.g. SPI_exec)
 --
-create or replace function pg_quote_ident(text) returns text as 'pg_quote_ident(arg1)' language 'plr';
+create or replace function pg_quote_ident(text) returns text as 'pg.quoteident(arg1)' language 'plr';
 select pg_quote_ident('Hello World');
  pg_quote_ident 
 ----------------
  "Hello World"
 (1 row)
 
-create or replace function pg_quote_literal(text) returns text as 'pg_quote_literal(arg1)' language 'plr';
+create or replace function pg_quote_literal(text) returns text as 'pg.quoteliteral(arg1)' language 'plr';
 select pg_quote_literal('Hello\'World');
  pg_quote_literal 
 ------------------
  'Hello''World'
 (1 row)
 
-create or replace function test_spi_t(text) returns text as 'pg_spi_exec(arg1)' language 'plr';
+create or replace function test_spi_t(text) returns text as 'pg.spi.exec(arg1)' language 'plr';
 select test_spi_t('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''');
  test_spi_t 
 ------------
  c(25, 26)
 (1 row)
 
-create or replace function test_spi_ta(text) returns text[] as 'pg_spi_exec(arg1)' language 'plr';
+create or replace function test_spi_ta(text) returns text[] as 'pg.spi.exec(arg1)' language 'plr';
 select test_spi_ta('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''');
      test_spi_ta      
 ----------------------
  {{25,text},{26,oid}}
 (1 row)
 
-create or replace function test_spi_tup(text) returns record as 'pg_spi_exec(arg1)' language 'plr';
+create or replace function test_spi_tup(text) returns record as 'pg.spi.exec(arg1)' language 'plr';
 select * from test_spi_tup('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''') as t(typeid oid, typename name);
  typeid | typename 
 --------+----------
      25 | text
      26 | oid
 (2 rows)
+
+create or replace function fetch_pgoid(text) returns int as 'pg.reval(arg1)' language 'plr';
+select fetch_pgoid('BYTEAOID');
+ fetch_pgoid 
+-------------
+          17
+(1 row)
+
+create or replace function test_spi_prep(text) returns text as 'sp <<- pg.spi.prepare(arg1, c(NAMEOID, NAMEOID)); print("OK")' language 'plr';
+select test_spi_prep('select oid, typname from pg_type where typname = $1 or typname = $2');
+ test_spi_prep 
+---------------
+ OK
+(1 row)
+
+create or replace function test_spi_execp(text, text, text) returns record as 'pg.spi.execp(pg.reval(arg1), list(arg2,arg3))' language 'plr';
+select * from test_spi_execp('sp','oid','text') as t(typeid oid, typename name);
+ typeid | typename 
+--------+----------
+     25 | text
+     26 | oid
+(2 rows)
+
+create or replace function test_spi_lastoid(text) returns text as 'pg.spi.exec(arg1); pg.spi.lastoid()/pg.spi.lastoid()' language 'plr';
+select test_spi_lastoid('insert into foo values(''cat3'',3.333)') as "ONE";
+ ONE 
+-----
+ 1
+(1 row)
 
