@@ -875,7 +875,10 @@ do_compile(FunctionCallInfo fcinfo,
 
 		perm_fmgr_info(typeStruct->typinput, &(function->result_in_func));
 
-		/* is return type an array? */
+		/*
+		 * Is return type an array? get_element_type will return InvalidOid
+		 * instead of actual element type if the type is not a varlena array.
+		 */
 		if (OidIsValid(get_element_type(function->result_typid)))
 			function->result_elem = typeStruct->typelem;
 		else	/* not an array */
@@ -966,7 +969,10 @@ do_compile(FunctionCallInfo fcinfo,
 
 			perm_fmgr_info(typeStruct->typoutput, &(function->arg_out_func[i]));
 
-			/* is argument an array? */
+			/*
+			 * Is argument type an array? get_element_type will return InvalidOid
+			 * instead of actual element type if the type is not a varlena array.
+			 */
 			if (OidIsValid(get_element_type(function->arg_typid[i])))
 				function->arg_elem[i] = typeStruct->typelem;
 			else	/* not ant array */
@@ -1235,7 +1241,7 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull)
 			/* for tuple args, convert to a one row data.frame */
 			CONVERT_TUPLE_TO_DATAFRAME;
 		}
-		else if (function->arg_elem[i] == 0)
+		else if (function->arg_elem[i] == InvalidOid)
 		{
 			/* for scalar args, convert to a one row vector */
 			Datum		dvalue = arg[i];

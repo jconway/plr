@@ -263,15 +263,11 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 		/* get column datatype oid */
 		element_type = SPI_gettypeid(tupdesc, j + 1);
 
-		/* special case -- NAME looks like an array, but treat as a scalar */
-		if (element_type == NAMEOID)
-			typelem = 0;
-		else
-			/* check to see it it is an array type */
-			typelem = get_element_type(element_type);
+		/* check to see it it is an array type */
+		typelem = get_element_type(element_type);
 
 		/* get new vector of the appropriate type and length */
-		if (typelem == 0)
+		if (typelem == InvalidOid)
 			PROTECT(fldvec = get_r_vector(element_type, nr));
 		else
 		{
@@ -285,7 +281,7 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 		/* loop rows for this column */
 		for (i = 0; i < nr; i++)
 		{
-			if (typelem == 0)
+			if (typelem == InvalidOid)
 			{
 				/* not an array type */
 				char	   *value;
