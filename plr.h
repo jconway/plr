@@ -237,10 +237,15 @@ typedef enum IOFuncSelector
 
 #else
 /*************************************************************************
- * working with postgres 7.4 compatible sources
+ * working with postgres 7.4 or 7.5 compatible sources
  *************************************************************************/
 
+#ifdef PG_VERSION_74_COMPAT
 #define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, false, SortMem)
+#else  /* 7.5 or greater */
+#define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, false, work_mem)
+#endif /* PG_VERSION_74_COMPAT */
+
 #define INIT_AUX_FMGR_ATTS \
 	do { \
 		finfo->fn_mcxt = QueryContext; \
