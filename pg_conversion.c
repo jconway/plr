@@ -263,7 +263,11 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 		/* get column datatype oid */
 		element_type = SPI_gettypeid(tupdesc, j + 1);
 
-		/* check to see it it is an array type */
+		/*
+		 * Check to see if it is an array type. get_element_type will return
+		 * InvalidOid instead of actual element type if the type is not a
+		 * varlena array.
+		 */
 		typelem = get_element_type(element_type);
 
 		/* get new vector of the appropriate type and length */
