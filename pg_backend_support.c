@@ -32,6 +32,8 @@
  */
 #include "plr.h"
 
+#include "optimizer/clauses.h"
+
 /* Example format: "/usr/local/pgsql/lib" */
 #ifndef PKGLIBDIR
 #error "PKGLIBDIR needs to be defined to compile this file."
@@ -97,6 +99,16 @@ bool
 isArrayTypeName(const char *typeName)
 {
 	return (typeName[0] == '_');
+}
+
+Oid
+get_expr_rettype(FunctionCallInfo fcinfo)
+{
+	/* can't return anything useful if we have no FmgrInfo */
+	if (fcinfo->flinfo == NULL)
+		return InvalidOid;
+	
+	return get_func_rettype(fcinfo->flinfo->fn_oid);
 }
 
 #endif /* PG_VERSION_73_COMPAT */
@@ -171,6 +183,7 @@ perm_fmgr_info(Oid functionId, FmgrInfo *finfo)
 {
 	fmgr_info_cxt(functionId, finfo, TopMemoryContext);
 	finfo->fn_mcxt = QueryContext;
+	INIT_FINFO_FUNCEXPR;
 }
 
 void

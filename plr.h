@@ -42,6 +42,7 @@
 
 #include "postgres.h"
 #include "access/heapam.h"
+#include "catalog/catversion.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
@@ -74,13 +75,6 @@
 /* working with postgres 7.3 compatible sources */
 #if (CATALOG_VERSION_NO < 200303091)
 #define PG_VERSION_73_COMPAT
-#endif
-/*
- * force PG_VERSION_73_COMPAT until first CATALOG_VERSION_NO bump
- * after construct_md_array, et. al. gets committed
- */
-#ifndef PG_VERSION_73_COMPAT
-/* #define PG_VERSION_73_COMPAT */
 #endif
 
 #ifdef DEBUGPROTECT
@@ -121,6 +115,140 @@
 
 #define NEXT_STR_ELEMENT	" %s"
 
+/*
+ * See the no-exported header file ${R_HOME}/src/include/Parse.h
+ */
+extern SEXP R_ParseVector(SEXP, int, int *);
+#define PARSE_NULL			0
+#define PARSE_OK			1
+#define PARSE_INCOMPLETE	2
+#define PARSE_ERROR			3
+#define PARSE_EOF			4
+
+/* convert C string to text pointer */
+#define PG_TEXT_GET_STR(textp_) \
+	DatumGetCString(DirectFunctionCall1(textout, PointerGetDatum(textp_)))
+#define PG_STR_GET_TEXT(str_) \
+	DatumGetTextP(DirectFunctionCall1(textin, CStringGetDatum(str_)))
+#define PG_REPLACE_STR(str_, substr_, replacestr_) \
+	PG_TEXT_GET_STR(DirectFunctionCall3(replace_text, \
+										PG_STR_GET_TEXT(str_), \
+										PG_STR_GET_TEXT(substr_), \
+										PG_STR_GET_TEXT(replacestr_)))
+
+#define CHECK_RETURN_PSEUDOTYPES \
+	do { \
+		if (typeStruct->typtype == 'p') \
+		{ \
+			if (procStruct->prorettype == VOIDOID || \
+				procStruct->prorettype == RECORDOID) \
+				 /* okay */ ; \
+			else if (procStruct->prorettype == TRIGGEROID) \
+			{ \
+				xpfree(prodesc->proname); \
+				xpfree(prodesc); \
+				elog(ERROR, "plr functions cannot return type %s" \
+					 "\n\texcept when used as triggers", \
+					 format_type_be(procStruct->prorettype)); \
+			} \
+			else \
+			{ \
+				xpfree(prodesc->proname); \
+				xpfree(prodesc); \
+				elog(ERROR, "plr functions cannot return type %s", \
+					 format_type_be(procStruct->prorettype)); \
+			} \
+		} \
+	} while (0)
+
+#define CHECK_ARG_PSEUDOTYPES \
+	do { \
+		if (typeStruct->typtype == 'p') \
+		{ \
+			xpfree(prodesc->proname); \
+			xpfree(prodesc); \
+			elog(ERROR, "plr functions cannot take type %s", \
+				 format_type_be(arg_typid[i])); \
+		} \
+	} while (0)
+
+
+#ifdef PG_VERSION_73_COMPAT
+/*************************************************************************
+ * working with postgres 7.3 compatible sources
+ *************************************************************************/
+
+#define INIT_FINFO_FUNCEXPR
+#define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, SortMem)
+#define GET_PRORETTYPE(prorettype_) \
+	do { \
+		prorettype_ = procStruct->prorettype; \
+	} while (0)
+
+#define GET_PROARGS(pronargs_, proargtypes_) \
+	do { \
+		int i; \
+		pronargs_ = procStruct->pronargs; \
+		for (i = 0; i < pronargs_; i++) \
+			proargtypes_[i] = procStruct->proargtypes[i]; \
+	} while (0)
+
+#define CHECK_POLYMORPHIC_TYPES
+
+
+#else
+/*************************************************************************
+ * working with postgres 7.4 compatible sources
+ *************************************************************************/
+
+#define INIT_FINFO_FUNCEXPR \
+	do { \
+		FuncExpr	   *funcexpr = NULL; \
+		MemoryContext	oldcontext; \
+		oldcontext = MemoryContextSwitchTo(TopMemoryContext); \
+		funcexpr = (FuncExpr *) make_funcclause(functionId, \
+						  get_func_rettype(functionId), \
+						  false, COERCE_DONTCARE, NIL); \
+		funcexpr->argtypes = get_func_argtypes(functionId, &funcexpr->nargs); \
+		finfo->fn_expr = (Node *) funcexpr; \
+		MemoryContextSwitchTo(oldcontext); \
+	} while (0)
+
+#define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, false, SortMem)
+#define GET_PRORETTYPE(prorettype_) \
+	do { \
+		prorettype_ = get_expr_rettype(fcinfo); \
+		if (prorettype_ == InvalidOid) \
+			prorettype_ = procStruct->prorettype; \
+	} while (0)
+
+#define GET_PROARGS(pronargs_, proargtypes_) \
+	do { \
+		int i; \
+		pronargs_ = procStruct->pronargs; \
+		for (i = 0; i < pronargs_; i++) \
+			proargtypes_[i] = get_expr_argtype(fcinfo, i); \
+	} while (0)
+
+#define CHECK_POLYMORPHIC_TYPES \
+	do { \
+		if (uptodate) \
+			uptodate = (result_typid == prodesc->result_typid); \
+		if (uptodate) \
+		{ \
+			int			i; \
+			for (i = 0; i < nargs; i++) \
+			{ \
+				if (arg_typid[i] != prodesc->arg_typid[i]) \
+				{ \
+					uptodate = false; \
+					break; \
+				} \
+			} \
+		} \
+	} while (0)
+
+#endif /* PG_VERSION_73_COMPAT */
 
 /*
  * structs
@@ -193,14 +321,6 @@ extern Datum array(PG_FUNCTION_ARGS);
 extern Datum array_accum(PG_FUNCTION_ARGS);
 
 /* Postgres backend support functions */
-
-#ifdef PG_VERSION_73_COMPAT
-extern ArrayType *construct_md_array(Datum *elems, int ndims, int *dims,
-									 int *lbs, Oid elmtype, int elmlen,
-									 bool elmbyval, char elmalign);
-extern bool isArrayTypeName(const char *typeName);
-#endif /* PG_VERSION_73_COMPAT */
-
 extern char *get_load_self_ref_cmd(Oid funcid);
 extern void perm_fmgr_info(Oid functionId, FmgrInfo *finfo);
 extern void system_cache_lookup(Oid element_type, bool input, int *typlen,
@@ -215,25 +335,18 @@ extern Oid get_typelem(Oid element_type);
 extern void R_PreserveObject(SEXP);
 extern void R_ReleaseObject(SEXP);
 
-/*
- * See the no-exported header file ${R_HOME}/src/include/Parse.h
- */
-extern SEXP R_ParseVector(SEXP, int, int *);
-#define PARSE_NULL			0
-#define PARSE_OK			1
-#define PARSE_INCOMPLETE	2
-#define PARSE_ERROR			3
-#define PARSE_EOF			4
+#ifdef PG_VERSION_73_COMPAT
+/*************************************************************************
+ * working with postgres 7.3 compatible sources
+ *************************************************************************/
 
-/* convert C string to text pointer */
-#define PG_TEXT_GET_STR(textp_) \
-	DatumGetCString(DirectFunctionCall1(textout, PointerGetDatum(textp_)))
-#define PG_STR_GET_TEXT(str_) \
-	DatumGetTextP(DirectFunctionCall1(textin, CStringGetDatum(str_)))
-#define PG_REPLACE_STR(str_, substr_, replacestr_) \
-	PG_TEXT_GET_STR(DirectFunctionCall3(replace_text, \
-										PG_STR_GET_TEXT(str_), \
-										PG_STR_GET_TEXT(substr_), \
-										PG_STR_GET_TEXT(replacestr_)))
+/* these are in the backend in 7.4 sources */
+extern ArrayType *construct_md_array(Datum *elems, int ndims, int *dims,
+									 int *lbs, Oid elmtype, int elmlen,
+									 bool elmbyval, char elmalign);
+extern bool isArrayTypeName(const char *typeName);
+extern Oid get_expr_rettype(FunctionCallInfo fcinfo);
+
+#endif /* PG_VERSION_73_COMPAT */
 
 #endif   /* PLR_H */

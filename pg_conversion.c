@@ -803,7 +803,7 @@ get_frame_tuplestore(SEXP rval,
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
 
 	/* initialize our tuplestore */
-	tupstore = tuplestore_begin_heap(true, SortMem);
+	tupstore = TUPLESTORE_BEGIN_HEAP;
 
 	MemoryContextSwitchTo(oldcontext);
 
@@ -943,7 +943,7 @@ get_matrix_tuplestore(SEXP rval,
 		nr = 1;
 
 	/* initialize our tuplestore */
-	tupstore = tuplestore_begin_heap(true, SortMem);
+	tupstore = TUPLESTORE_BEGIN_HEAP;
 
 	MemoryContextSwitchTo(oldcontext);
 
@@ -1005,7 +1005,7 @@ get_generic_tuplestore(SEXP rval,
 		nr = 1;
 
 	/* initialize our tuplestore */
-	tupstore = tuplestore_begin_heap(true, SortMem);
+	tupstore = TUPLESTORE_BEGIN_HEAP;
 
 	MemoryContextSwitchTo(oldcontext);
 
