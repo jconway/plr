@@ -34,6 +34,7 @@
 #include "tcop/tcopprot.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "fmgr.h"
 
@@ -205,6 +206,7 @@ static SEXP pg_get_r_tuple(TupleDesc desc, HeapTuple tuple, Relation relation);
 static void system_cache_lookup(Oid element_type, bool input, int *typlen,
 					bool *typbyval, char *typdelim, Oid *typelem,
 					Oid *proc, char *typalign);
+static ArrayType *array_create(FunctionCallInfo fcinfo, int numelems, int elem_start);
 
 /*
  * external declarations
@@ -212,6 +214,9 @@ static void system_cache_lookup(Oid element_type, bool input, int *typlen,
 extern int Rf_initEmbeddedR(int argc, char **argv);
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
 extern void throw_pg_error(const char **msg);
+extern Datum array_push(PG_FUNCTION_ARGS);
+extern Datum array(PG_FUNCTION_ARGS);
+extern Datum array_accum(PG_FUNCTION_ARGS);
 
 /*
  * See the no-exported header file ${R_HOME}/src/include/Parse.h
@@ -288,6 +293,7 @@ static void
 perm_fmgr_info(Oid functionId, FmgrInfo *finfo)
 {
 	fmgr_info_cxt(functionId, finfo, TopMemoryContext);
+	finfo->fn_mcxt = QueryContext;
 }
 
 /*
@@ -1158,8 +1164,173 @@ system_cache_lookup(Oid element_type,
 	ReleaseSysCache(typeTuple);
 }
 
+/*
+ * Functions used in R
+ */
 void
 throw_pg_error(const char **msg)
 {
 	elog(NOTICE, "%s", *msg);
 }
+
+
+
+
+/*
+ * User visible PostgreSQL functions
+ */
+/*-----------------------------------------------------------------------------
+ * array :
+ *		form a one-dimensional array given starting elements
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(array);
+Datum
+array(PG_FUNCTION_ARGS)
+{
+	ArrayType  *result;
+
+	result = array_create(fcinfo, PG_NARGS(), 0);
+
+	PG_RETURN_ARRAYTYPE_P(result);
+}
+
+/*-----------------------------------------------------------------------------
+ * array_push :
+ *		push an element onto the end of a one-dimensional array
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(array_push);
+Datum
+array_push(PG_FUNCTION_ARGS)
+{
+	ArrayType  *v = PG_GETARG_ARRAYTYPE_P(0);
+	Datum		newelem = PG_GETARG_DATUM(1);
+	int		   *dimv,
+			   *lb, ub;
+	ArrayType  *result;
+	int			indx;
+	bool		isNull;
+	Oid			element_type;
+	int			typlen;
+	bool		typbyval;
+	char		typdelim;
+	Oid			typinput,
+				typelem;
+	char		typalign;
+
+	/* Sanity check: do we have a one-dimensional array */
+	if (ARR_NDIM(v) != 1)
+		elog(ERROR, "array_push: only one-dimensional arrays are supported");
+
+	lb = ARR_LBOUND(v);
+	dimv = ARR_DIMS(v);
+	ub = dimv[0] + lb[0] - 1;
+	indx = ub + 1;
+
+	element_type = ARR_ELEMTYPE(v);
+	/* Sanity check: do we have a non-zero element type */
+	if (element_type == 0)
+		elog(ERROR, "array_push: invalid array element type");
+
+	system_cache_lookup(element_type, true, &typlen, &typbyval,
+						&typdelim, &typelem, &typinput, &typalign);
+
+	result = array_set(v, 1, &indx, newelem, -1,
+						typlen, typbyval, typalign, &isNull);
+
+	PG_RETURN_ARRAYTYPE_P(result);
+}
+
+/*-----------------------------------------------------------------------------
+ * array_accum :
+ *		accumulator to build an array from input values -- when used in
+ *		conjunction with plr functions that accept an array, and output
+ *		a statistic, this can be used to create custom aggregates.
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(array_accum);
+Datum
+array_accum(PG_FUNCTION_ARGS)
+{
+	Datum		v = PG_GETARG_DATUM(0);
+	Datum		newelem = PG_GETARG_DATUM(1);
+	ArrayType  *result;
+
+	if (PG_ARGISNULL(0))
+		result = array_create(fcinfo, 1, 1);
+	else
+		result = DatumGetArrayTypeP(DirectFunctionCall2(array_push, v, newelem));
+
+	PG_RETURN_ARRAYTYPE_P(result);
+}
+
+/*
+ * actually does the work for array(), and array_accum() if it is given a null
+ * input array.
+ *
+ * numelems and elem_start allow the function to be shared given the differing
+ * arguments accepted by array() and array_accum(). With array(), all function
+ * arguments are used for array construction -- therefore elem_start is 0 and
+ * numelems is the number of function arguments. With array_accum(), we are
+ * always initializing the array with a single element given to us as argument
+ * number 1 (i.e. the second argument).
+ */
+static ArrayType *
+array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
+{
+	Oid			funcid = fcinfo->flinfo->fn_oid;
+	Datum	   *dvalues = (Datum *) palloc(numelems * sizeof(Datum));
+	int			typlen;
+	bool		typbyval;
+	char		typdelim;
+	Oid			typinput,
+				typelem,
+				element_type;
+	char		typalign;
+	int			i;
+	HeapTuple	tp;
+	Oid			functypeid;
+	Oid		   *funcargtypes;
+	ArrayType  *result;
+
+	if (numelems == 0)
+		elog(ERROR, "array: at least one value required to construct an array");
+
+	/*
+	 * Get the type metadata for the array return type and its elements
+	 */
+	tp = SearchSysCache(PROCOID,
+						ObjectIdGetDatum(funcid),
+						0, 0, 0);
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "Function OID %u does not exist", funcid);
+
+	functypeid = ((Form_pg_proc) GETSTRUCT(tp))->prorettype;
+	getTypeInputInfo(functypeid, &typinput, &element_type);
+
+	system_cache_lookup(element_type, true, &typlen, &typbyval,
+						&typdelim, &typelem, &typinput, &typalign);
+
+	funcargtypes = ((Form_pg_proc) GETSTRUCT(tp))->proargtypes;
+
+	/*
+	 * the first function argument(s) may not be one of our array elements,
+	 * but the caller is responsible to ensure we get nothing but array
+	 * elements once they start coming
+	 */
+	for (i = elem_start; i < elem_start + numelems; i++)
+		if (funcargtypes[i] != element_type)
+			elog(ERROR, "array_create: argument %d datatype not " \
+						"compatible with return data type", i + 1);
+	ReleaseSysCache(tp);
+
+	for (i = 0; i < numelems; i++)
+		dvalues[i] = PG_GETARG_DATUM(elem_start + i);
+
+	result = construct_array(dvalues, numelems, element_type,
+							 typlen, typbyval, typalign);
+
+	return result;
+}
+
