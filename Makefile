@@ -20,7 +20,7 @@ rpath :=
 
 MODULE_big = plr
 PG_CPPFLAGS = -I$(r_includespec)
-SRCS		+= plr.c pg_backend_support.c pg_userfuncs.c pg_rsupport.c
+SRCS		+= plr.c pg_conversion.c pg_backend_support.c pg_userfuncs.c pg_rsupport.c
 OBJS		:= $(SRCS:.c=.o)
 SHLIB_LINK = -L$(r_libdir) -lR
 

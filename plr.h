@@ -141,11 +141,18 @@ extern Datum plr_call_handler(PG_FUNCTION_ARGS);
 extern void load_r_cmd(const char *cmd);
 extern SEXP callRFunction(SEXP fun, SEXP rargs);
 
+/* argument and return value conversion functions */
+extern SEXP pg_get_r(plr_proc_desc *prodesc, FunctionCallInfo fcinfo, int idx);
+extern Datum r_get_pg(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo);
+extern Datum get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem);
+
 /* Postgres support functions installed into the R interpreter */
 extern void throw_pg_error(const char **msg);
 extern SEXP plr_quote_literal(SEXP rawstr);
 extern SEXP plr_quote_ident(SEXP rawstr);
 extern SEXP plr_SPI_exec(SEXP rsql);
+extern SEXP plr_SPI_prepare(SEXP rsql, SEXP rargtypes);
+extern SEXP plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues);
 
 /* Postgres callable functions useful in conjunction with PL/R */
 extern Datum install_rcmd(PG_FUNCTION_ARGS);
@@ -154,13 +161,11 @@ extern Datum array(PG_FUNCTION_ARGS);
 extern Datum array_accum(PG_FUNCTION_ARGS);
 
 /* Postgres backend support functions */
+extern char *get_load_self_ref_cmd(Oid funcid);
+extern void perm_fmgr_info(Oid functionId, FmgrInfo *finfo);
 extern void system_cache_lookup(Oid element_type, bool input, int *typlen,
 					bool *typbyval, char *typdelim, Oid *typelem,
 					Oid *proc, char *typalign);
-extern char *expand_dynamic_library_name(const char *name);
-extern char *substitute_libpath_macro(const char *name);
-extern char *find_in_dynamic_libpath(const char *basename);
-extern bool file_exists(const char *name);
 
 /*
  * See the no-exported header file ${R_HOME}/src/include/Parse.h

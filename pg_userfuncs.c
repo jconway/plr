@@ -6,7 +6,7 @@
  * ALL RIGHTS RESERVED;
  * 
  * Joe Conway <mail@joeconway.com>
- *
+ * 
  * Heavily based on pltcl by Jan Wieck
  * and
  * on REmbeddedPostgres by

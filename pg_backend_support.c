@@ -6,7 +6,7 @@
  * ALL RIGHTS RESERVED;
  * 
  * Joe Conway <mail@joeconway.com>
- *
+ * 
  * Heavily based on pltcl by Jan Wieck
  * and
  * on REmbeddedPostgres by
@@ -41,6 +41,87 @@
 /* GUC variable */
 extern char *Dynamic_library_path;
 
+/*
+ * static declarations
+ */
+static char *get_lib_pathstr(Oid funcid);
+static char *expand_dynamic_library_name(const char *name);
+static char *substitute_libpath_macro(const char *name);
+static char *find_in_dynamic_libpath(const char *basename);
+static bool file_exists(const char *name);
+
+static char *
+get_lib_pathstr(Oid funcid)
+{
+	HeapTuple			procedureTuple;
+	Form_pg_proc		procedureStruct;
+	Oid					language;
+	HeapTuple			languageTuple;
+	Form_pg_language	languageStruct;
+	Oid					lang_funcid;
+	Datum				tmp;
+	bool				isnull;
+	char			   *raw_path;
+	char			   *cooked_path;
+
+	/* get the pg_proc entry */
+	procedureTuple = SearchSysCache(PROCOID,
+									ObjectIdGetDatum(funcid),
+									0, 0, 0);
+	if (!HeapTupleIsValid(procedureTuple))
+		elog(ERROR, "get_lib_pathstr: cache lookup for function %u failed",
+			 funcid);
+	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
+
+	/* now get the pg_language entry */
+	language = procedureStruct->prolang;
+	ReleaseSysCache(procedureTuple);
+
+	languageTuple = SearchSysCache(LANGOID,
+								   ObjectIdGetDatum(language),
+								   0, 0, 0);
+	if (!HeapTupleIsValid(languageTuple))
+		elog(ERROR, "get_lib_pathstr: cache lookup for language %u failed",
+			 language);
+	languageStruct = (Form_pg_language) GETSTRUCT(languageTuple);
+	lang_funcid = languageStruct->lanplcallfoid;
+	ReleaseSysCache(languageTuple);
+
+	/* finally, get the pg_proc entry for the language handler */
+	procedureTuple = SearchSysCache(PROCOID,
+									ObjectIdGetDatum(lang_funcid),
+									0, 0, 0);
+	if (!HeapTupleIsValid(procedureTuple))
+		elog(ERROR, "get_lib_pathstr: cache lookup for function %u failed",
+			 lang_funcid);
+	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
+
+	tmp = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_probin, &isnull);
+	raw_path = DatumGetCString(DirectFunctionCall1(byteaout, tmp));
+	cooked_path = expand_dynamic_library_name(raw_path);
+
+	ReleaseSysCache(procedureTuple);
+
+	return cooked_path;
+}
+
+char *
+get_load_self_ref_cmd(Oid funcid)
+{
+	char   *libstr = get_lib_pathstr(funcid);
+	char   *buf = (char *) palloc(strlen(libstr) + 12 + 1);
+
+	sprintf(buf, "dyn.load(\"%s\")", libstr);
+	return buf;
+}
+
+void
+perm_fmgr_info(Oid functionId, FmgrInfo *finfo)
+{
+	fmgr_info_cxt(functionId, finfo, TopMemoryContext);
+	finfo->fn_mcxt = QueryContext;
+}
+
 void
 system_cache_lookup(Oid element_type,
 					bool input,
@@ -73,7 +154,7 @@ system_cache_lookup(Oid element_type,
 	ReleaseSysCache(typeTuple);
 }
 
-bool
+static bool
 file_exists(const char *name)
 {
 	struct stat st;
@@ -97,7 +178,7 @@ file_exists(const char *name)
  *
  * A non-NULL result will always be freshly palloc'd.
  */
-char *
+static char *
 expand_dynamic_library_name(const char *name)
 {
 	bool		have_slash;
@@ -150,7 +231,7 @@ expand_dynamic_library_name(const char *name)
  * Substitute for any macros appearing in the given string.
  * Result is always freshly palloc'd.
  */
-char *
+static char *
 substitute_libpath_macro(const char *name)
 {
 	size_t		macroname_len;
@@ -190,7 +271,7 @@ substitute_libpath_macro(const char *name)
  * is returned in freshly palloc'd memory.  If the file is not found,
  * return NULL.
  */
-char *
+static char *
 find_in_dynamic_libpath(const char *basename)
 {
 	const char *p;
