@@ -228,7 +228,7 @@ plr_array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
 
 	get_typlenbyvalalign(element_type, &typlen, &typbyval, &typalign);
 
-	funcargtypes = ((Form_pg_proc) GETSTRUCT(tp))->proargtypes;
+	funcargtypes = FUNCARGTYPES(tp);
 
 	/*
 	 * the first function argument(s) may not be one of our array elements,

@@ -33,9 +33,9 @@
 #include "plr.h"
 #include "storage/ipc.h"
 
-#ifdef PG_VERSION_80_COMPAT
+#if defined(PG_VERSION_80_COMPAT) || defined(PG_VERSION_81_COMPAT)
 #include "utils/typcache.h"
-#endif /* PG_VERSION_80_COMPAT */
+#endif /* PG_VERSION_80_COMPAT || PG_VERSION_81_COMPAT */
 
 /*
  * Global data
@@ -120,9 +120,9 @@ static SEXP plr_parse_func_body(const char *body);
 static SEXP plr_convertargs(plr_function *function, Datum *arg, bool *argnull);
 static void plr_error_callback(void *arg);
 
-#ifdef PG_VERSION_80_COMPAT
+#if defined(PG_VERSION_80_COMPAT) || defined(PG_VERSION_81_COMPAT)
 static char **fetchArgNames(HeapTuple procTup, int nargs);
-#endif /* PG_VERSION_80_COMPAT */
+#endif /* PG_VERSION_80_COMPAT || PG_VERSION_81_COMPAT */
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -1335,7 +1335,7 @@ plr_error_callback(void *arg)
 		errcontext("In PL/R function %s", (char *) arg);
 }
 
-#ifdef PG_VERSION_80_COMPAT
+#if defined(PG_VERSION_80_COMPAT) || defined(PG_VERSION_81_COMPAT)
 /*
  * Fetch the argument names, if any, from the proargnames field of the
  * pg_proc tuple.  Results are palloc'd.
@@ -1374,4 +1374,4 @@ fetchArgNames(HeapTuple procTup, int nargs)
 
 	return result;
 }
-#endif /* PG_VERSION_80_COMPAT */
+#endif /* PG_VERSION_80_COMPAT || PG_VERSION_81_COMPAT */

@@ -82,8 +82,10 @@
 #define PG_VERSION_73_COMPAT
 #elif (CATALOG_VERSION_NO <= 200310211)
 #define PG_VERSION_74_COMPAT
-#else
+#elif (CATALOG_VERSION_NO <= 200411041)
 #define PG_VERSION_80_COMPAT
+#else
+#define PG_VERSION_81_COMPAT
 #endif
 
 #ifdef DEBUGPROTECT
@@ -279,7 +281,19 @@ typedef enum IOFuncSelector
 
 #endif /* PG_VERSION_73_COMPAT */
 
-#ifdef PG_VERSION_80_COMPAT
+#ifdef PG_VERSION_81_COMPAT
+#define PROARGTYPES(i) \
+		procStruct->proargtypes.values[i]
+#define FUNCARGTYPES(_tup_) \
+		funcargtypes = ((Form_pg_proc) GETSTRUCT(_tup_))->proargtypes.values
+#else  /* 8.0 or less */
+#define PROARGTYPES(i) \
+		procStruct->proargtypes[i]
+#define FUNCARGTYPES(_tup_) \
+		funcargtypes = ((Form_pg_proc) GETSTRUCT(_tup_))->proargtypes
+#endif /* PG_VERSION_81_COMPAT */
+
+#if defined(PG_VERSION_80_COMPAT) || defined(PG_VERSION_81_COMPAT)
 /*************************************************************************
  * working with postgres 8.0 compatible sources
  *************************************************************************/
@@ -453,7 +467,7 @@ typedef enum IOFuncSelector
 #define PLR_PG_CATCH()
 #define PLR_PG_END_TRY() \
 	memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart))
-#endif /* PG_VERSION_80_COMPAT */
+#endif /* PG_VERSION_80_COMPAT || PG_VERSION_81_COMPAT */
 
 /*
  * structs
