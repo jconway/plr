@@ -176,6 +176,9 @@ plr_SPI_exec(SEXP rsql)
 			SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(buf));
 			UNPROTECT(1);
 
+			/* restore normal error handling */
+			memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
+
 			return result;
 
 		case SPI_OK_SELINTO:
@@ -188,6 +191,9 @@ plr_SPI_exec(SEXP rsql)
 			PROTECT(result = NEW_CHARACTER(1));
 			SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(buf));
 			UNPROTECT(1);
+
+			/* restore normal error handling */
+			memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
 
 			return result;
 
@@ -549,6 +555,9 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 			SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(buf));
 			UNPROTECT(1);
 
+			/* restore normal error handling */
+			memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
+
 			return result;
 
 		case SPI_OK_SELINTO:
@@ -561,6 +570,9 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 			PROTECT(result = NEW_CHARACTER(1));
 			SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(buf));
 			UNPROTECT(1);
+
+			/* restore normal error handling */
+			memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
 
 			return result;
 
