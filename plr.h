@@ -63,6 +63,7 @@
 #include "R.h"
 #include "Rinternals.h"
 #include "Rdefines.h"
+#include "Rversion.h"
 
 #ifdef ERROR
 #undef ERROR
@@ -119,7 +120,14 @@
 #define NEXT_STR_ELEMENT	" %s"
 
 /*
- * See the no-exported header file ${R_HOME}/src/include/Parse.h
+ * R version is calculated thus:
+ *   Maj * 65536 + Minor * 256 + Build * 1
+ * So version 1.8.0 results in:
+ *   1   * 65536 + 8     * 256 + 0     * 1 == 67584
+ */
+#if (R_VERSION < 67584)
+/*
+ * See the non-exported header file ${R_HOME}/src/include/Parse.h
  */
 extern SEXP R_ParseVector(SEXP, int, int *);
 #define PARSE_NULL			0
@@ -128,26 +136,20 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 #define PARSE_ERROR			3
 #define PARSE_EOF			4
 
+#define R_PARSEVECTOR(a_, b_, c_)		R_ParseVector(a_, b_, c_)
 
 /*
- * See the no-exported header file ${R_HOME}/src/include/Startup.h
+ * See the non-exported header file ${R_HOME}/src/include/Defn.h
  */
-/* Startup Actions */
-typedef enum {
-    SA_NORESTORE,/* = 0 */
-    SA_RESTORE,
-    SA_DEFAULT,/* was === SA_RESTORE */
-    SA_NOSAVE,
-    SA_SAVE,
-    SA_SAVEASK,
-    SA_SUICIDE
-} SA_TYPE;
+extern void R_PreserveObject(SEXP);
+extern void R_ReleaseObject(SEXP);
 
-/*
- * See the no-exported header file ${R_HOME}/src/unix/Runix.h
- */
-extern void Rstd_CleanUp(SA_TYPE saveact, int status, int runLast);
+#else
 
+#include "R_ext/Parse.h"
+#define R_PARSEVECTOR(a_, b_, c_)		R_ParseVector(a_, b_, (ParseStatus *) c_)
+
+#endif /* R_VERSION */
 
 /* convert C string to text pointer */
 #define PG_TEXT_GET_STR(textp_) \
@@ -347,12 +349,6 @@ extern void plr_HashTableInsert(plr_function *function,
 extern void plr_HashTableDelete(plr_function *function);
 extern char *get_load_self_ref_cmd(Oid funcid);
 extern void perm_fmgr_info(Oid functionId, FmgrInfo *finfo);
-
-/*
- * See the no-exported header file ${R_HOME}/src/include/Defn.h
- */
-extern void R_PreserveObject(SEXP);
-extern void R_ReleaseObject(SEXP);
 
 #ifndef PG_VERSION_73_COMPAT
 /*************************************************************************

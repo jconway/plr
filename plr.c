@@ -183,7 +183,7 @@ load_r_cmd(const char *cmd)
 
 	PROTECT(cmdSexp = NEW_CHARACTER(1));
 	SET_STRING_ELT(cmdSexp, 0, COPY_TO_USER_STRING(cmd));
-	PROTECT(cmdexpr = R_ParseVector(cmdSexp, -1, &status));
+	PROTECT(cmdexpr = R_PARSEVECTOR(cmdSexp, -1, &status));
 	if (status != PARSE_OK) {
 	    UNPROTECT(2);
 		if (last_R_error_msg)
@@ -230,7 +230,20 @@ load_r_cmd(const char *cmd)
 void
 plr_cleanup(void)
 {
-	Rstd_CleanUp(SA_NOSAVE, 0, FALSE);
+	char   *buf;
+	char   *tmpdir = getenv("R_SESSION_TMPDIR");
+
+	if(tmpdir)
+	{
+		/*
+		 * length needed = 'rm -rf ""' == 9
+		 * plus 1 for NULL terminator
+		 * plus length of dir string
+		 */
+		buf = (char *) palloc(9 + 1 + strlen(tmpdir));
+		sprintf(buf, "rm -rf \"%s\"", tmpdir);
+		system(buf);
+	}
 }
 
 /*
@@ -1140,7 +1153,7 @@ plr_parse_func_body(const char *body)
 	PROTECT(rbody = NEW_CHARACTER(1));
 	SET_STRING_ELT(rbody, 0, COPY_TO_USER_STRING(body));
 
-	PROTECT(fun = VECTOR_ELT(R_ParseVector(rbody, -1, &status), 0));
+	PROTECT(fun = VECTOR_ELT(R_PARSEVECTOR(rbody, -1, &status), 0));
 	if (status != PARSE_OK)
 	{
 	    UNPROTECT(2);
