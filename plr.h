@@ -63,6 +63,7 @@
 #include "R.h"
 #include "Rinternals.h"
 #include "Rdefines.h"
+#include "Rdevices.h"
 #include "Rversion.h"
 
 #ifdef ERROR
@@ -144,7 +145,13 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 extern void R_PreserveObject(SEXP);
 extern void R_ReleaseObject(SEXP);
 
-#else
+/* in main.c */
+extern void R_dot_Last(void);
+
+/* in memory.c */
+extern void R_RunExitFinalizers(void);
+
+#else /* R_VERSION >= 1.8.0 */
 
 #include "R_ext/Parse.h"
 #define R_PARSEVECTOR(a_, b_, c_)		R_ParseVector(a_, b_, (ParseStatus *) c_)

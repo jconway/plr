@@ -233,6 +233,10 @@ plr_cleanup(void)
 	char   *buf;
 	char   *tmpdir = getenv("R_SESSION_TMPDIR");
 
+	R_dot_Last();
+	R_RunExitFinalizers();
+	KillAllDevices();
+
 	if(tmpdir)
 	{
 		/*
