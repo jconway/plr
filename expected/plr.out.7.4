@@ -510,7 +510,7 @@ select r_test(null) is null as "NULL";
  t
 (1 row)
 
-CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS 'if (is.na(arg1) && is.na(arg2)) return(NA);if (is.na(arg1)) return(arg2);if (is.na(arg2)) return(arg1);if (arg1 > arg2) return(arg1);arg2' LANGUAGE 'plr';
+CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS 'if (is.null(arg1) && is.null(arg2)) return(NA);if (is.null(arg1)) return(arg2);if (is.null(arg2)) return(arg1);if (arg1 > arg2) return(arg1);arg2' LANGUAGE 'plr';
 select r_max(1,2) as "TWO";
  TWO 
 -----

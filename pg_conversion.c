@@ -122,11 +122,10 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	dim = ARR_DIMS(v);
 	nitems = ArrayGetNItems(ndim, dim);
 
-	/* pass an NA if the array is empty */
+	/* array is empty */
 	if (nitems == 0)
 	{
-		PROTECT(result = NEW_CHARACTER(1));
-		SET_STRING_ELT(result, 0, NA_STRING);
+		PROTECT(result = get_r_vector(element_type, nitems));
 		UNPROTECT(1);
 
 		return result;
@@ -406,9 +405,7 @@ r_get_pg(SEXP rval, plr_function *function, FunctionCallInfo fcinfo)
 	else
 	{
 		/* short circuit if return value is Null */
-		if (rval == R_NilValue ||
-			isNull(rval) ||
-			length(rval) == 0)		/* probably redundant */
+		if (rval == R_NilValue || isNull(rval))	/* probably redundant */
 		{
 			fcinfo->isnull = true;
 			return (Datum) 0;
@@ -732,29 +729,43 @@ get_generic_array_datum(SEXP rval, plr_function *function, bool *isnull)
 	int			dims[ndims];
 	int			lbs[ndims];
 
-	dvalues = (Datum *) palloc(objlen * sizeof(Datum));
-	PROTECT(obj =  AS_CHARACTER(rval));
-
-	/* Loop is needed here as result value might be of length > 1 */
-	for(i = 0; i < objlen; i++)
+	if (objlen > 0)
 	{
-		value = CHAR(STRING_ELT(obj, i));
+		dvalues = (Datum *) palloc(objlen * sizeof(Datum));
+		PROTECT(obj =  AS_CHARACTER(rval));
 
-		if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
-			elog(ERROR, "plr: cannot return array with NULL elements");
-		else
-			dvalues[i] = FunctionCall3(&in_func,
-									CStringGetDatum(value),
-									(Datum) 0,
-									Int32GetDatum(-1));
-    }
-	UNPROTECT(1);
+		/* Loop is needed here as result value might be of length > 1 */
+		for(i = 0; i < objlen; i++)
+		{
+			value = CHAR(STRING_ELT(obj, i));
 
-	dims[0] = objlen;
-	lbs[0] = 1;
+			if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
+				elog(ERROR, "plr: cannot return array with NULL elements");
+			else
+				dvalues[i] = FunctionCall3(&in_func,
+										CStringGetDatum(value),
+										(Datum) 0,
+										Int32GetDatum(-1));
+	    }
+		UNPROTECT(1);
 
-	array = construct_md_array(dvalues, ndims, dims, lbs,
-								result_elem, typlen, typbyval, typalign);
+		dims[0] = objlen;
+		lbs[0] = 1;
+
+		array = construct_md_array(dvalues, ndims, dims, lbs,
+									result_elem, typlen, typbyval, typalign);
+	}
+	else
+	{
+		/* create an empty array */
+		int		nbytes = ARR_OVERHEAD(0);
+
+		array = (ArrayType *) palloc(nbytes);
+		array->size = nbytes;
+		array->ndim = 0;
+		array->flags = 0;
+		array->elemtype = result_elem;
+	}
 
 	dvalue = PointerGetDatum(array);
 

@@ -222,7 +222,7 @@ select test_spi_lastoid('insert into foo values(10,''cat3'',3.333)') as "ONE";
 CREATE OR REPLACE FUNCTION r_test (float8) RETURNS float8 AS 'arg1' LANGUAGE 'plr';
 select r_test(null) is null as "NULL";
 
-CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS 'if (is.na(arg1) && is.na(arg2)) return(NA);if (is.na(arg1)) return(arg2);if (is.na(arg2)) return(arg1);if (arg1 > arg2) return(arg1);arg2' LANGUAGE 'plr';
+CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS 'if (is.null(arg1) && is.null(arg2)) return(NA);if (is.null(arg1)) return(arg2);if (is.null(arg2)) return(arg1);if (arg1 > arg2) return(arg1);arg2' LANGUAGE 'plr';
 select r_max(1,2) as "TWO";
 select r_max(null,2) as "TWO";
 select r_max(1,null) as "ONE";

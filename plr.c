@@ -923,8 +923,7 @@ plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
 		if (fcinfo->argnull[i])
 		{
 			/* fast track for null arguments */
-			PROTECT(el = NEW_CHARACTER(1));
-			SET_STRING_ELT(el, 0, NA_STRING);
+			PROTECT(el = R_NilValue);
 		}
 		else if (function->arg_is_rel[i])
 		{
