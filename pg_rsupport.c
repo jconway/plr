@@ -323,7 +323,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 			char		typalign;
 			FmgrInfo	typinfunc;
 
-			typeids[i] = (int) VECTOR_ELT(rargtypes, i);
+			typeids[i] = INTEGER(rargtypes)[i];
 
 			/* switch to long lived context to create plan description elements */
 			oldcontext = MemoryContextSwitchTo(TopMemoryContext);

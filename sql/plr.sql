@@ -177,6 +177,9 @@ CREATE TYPE vtup AS (f1 int);
 create or replace function test_dtup1() returns setof dtup as 'data.frame(letters[1:10],1:10)' language 'plr';
 select * from test_dtup1();
 
+create or replace function test_dtup2() returns setof dtup as 'data.frame(c("c","qw","ax","h","k","ax","l","t","b","u"),1:10)' language 'plr';
+select * from test_dtup2();
+
 create or replace function test_mtup1() returns setof mtup as 'as.matrix(array(1:15,c(5,3)))' language 'plr';
 select * from test_mtup1();
 

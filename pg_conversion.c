@@ -589,10 +589,10 @@ get_trigger_tuple(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bo
 						if(TAG(t) == R_LevelsSymbol)
 						{
 							SEXP	obj;
-							int		idx = (int) VECTOR_ELT(dfcol, i);
+							int		idx = INTEGER(dfcol)[i] - 1;
 
 							PROTECT(obj = CAR(t));
-							values[j] = pstrdup(CHAR(STRING_ELT(obj, idx - 1)));
+							values[j] = pstrdup(CHAR(STRING_ELT(obj, idx)));
 							UNPROTECT(1);
 
 							break;
@@ -1157,10 +1157,10 @@ get_frame_tuplestore(SEXP rval,
 					if(TAG(t) == R_LevelsSymbol)
 					{
 						SEXP	obj;
-						int		idx = (int) VECTOR_ELT(dfcol, i);
+						int		idx = INTEGER(dfcol)[i] - 1;
 
 						PROTECT(obj = CAR(t));
-						values[j] = pstrdup(CHAR(STRING_ELT(obj, idx - 1)));
+						values[j] = pstrdup(CHAR(STRING_ELT(obj, idx)));
 						UNPROTECT(1);
 
 						break;

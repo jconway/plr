@@ -402,6 +402,22 @@ select * from test_dtup1();
  j  | 10
 (10 rows)
 
+create or replace function test_dtup2() returns setof dtup as 'data.frame(c("c","qw","ax","h","k","ax","l","t","b","u"),1:10)' language 'plr';
+select * from test_dtup2();
+ f1 | f2 
+----+----
+ c  |  1
+ qw |  2
+ ax |  3
+ h  |  4
+ k  |  5
+ ax |  6
+ l  |  7
+ t  |  8
+ b  |  9
+ u  | 10
+(10 rows)
+
 create or replace function test_mtup1() returns setof mtup as 'as.matrix(array(1:15,c(5,3)))' language 'plr';
 select * from test_mtup1();
  f1 | f2 | f3 
