@@ -67,6 +67,7 @@ static HTAB *plr_HashTable;
 #define TYPEOIDS_CMD 	"ABSTIMEOID <- as.integer(702); " \
 						"ACLITEMOID <- as.integer(1033); " \
 						"ANYARRAYOID <- as.integer(2277); " \
+						"ANYELEMENTOID <- as.integer(2283); " \
 						"ANYOID <- as.integer(2276); " \
 						"BITOID <- as.integer(1560); " \
 						"BOOLOID <- as.integer(16); " \
@@ -202,7 +203,7 @@ static void plr_init_interp(Oid funcid);
 static void plr_init_all(Oid funcid);
 static HeapTuple plr_trigger_handler(PG_FUNCTION_ARGS);
 static Datum plr_func_handler(PG_FUNCTION_ARGS);
-static plr_proc_desc *compile_plr_function(Oid fn_oid, bool is_trigger);
+static plr_proc_desc *compile_plr_function(FunctionCallInfo fcinfo, bool is_trigger);
 static plr_proc_desc *get_prodesc_by_name(char *name);
 static SEXP plr_parse_func_body(const char *body);
 static SEXP plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo);
@@ -481,7 +482,7 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	Datum			retval;
 
 	/* Find or compile the function */
-	prodesc = compile_plr_function(fcinfo->flinfo->fn_oid, false);
+	prodesc = compile_plr_function(fcinfo, false);
 	PROTECT(fun = prodesc->fun);
 
 	/* Convert all call arguments */
@@ -505,8 +506,9 @@ plr_func_handler(PG_FUNCTION_ARGS)
  * compile_plr_function	- compile (or hopefully just look up) function
  */
 static plr_proc_desc *
-compile_plr_function(Oid fn_oid, bool is_trigger)
+compile_plr_function(FunctionCallInfo fcinfo, bool is_trigger)
 {
+	Oid				fn_oid = fcinfo->flinfo->fn_oid;
 	HeapTuple		procTup;
 	Form_pg_proc	procStruct;
 	char			internal_proname[MAX_PRONAME_LEN];
@@ -620,11 +622,16 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 			}
 			typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
 
-			/* Disallow pseudotype result, except VOID or RECORD */
+			/*
+			 * Disallow pseudotype result, except VOID, RECORD, ANYARRAY,
+			 * or ANYELEMENT
+			 */
 			if (typeStruct->typtype == 'p')
 			{
 				if (procStruct->prorettype == VOIDOID ||
-					procStruct->prorettype == RECORDOID)
+					procStruct->prorettype == RECORDOID ||
+					procStruct->prorettype == ANYARRAYOID ||
+					procStruct->prorettype == ANYELEMENTOID)
 					 /* okay */ ;
 				else if (procStruct->prorettype == TRIGGEROID)
 				{
@@ -650,11 +657,21 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 			prodesc->result_typid = procStruct->prorettype;
 			perm_fmgr_info(typeStruct->typinput, &(prodesc->result_in_func));
 
-			/* special case -- NAME looks like an array, but treat as a scalar */
-			if (prodesc->result_typid == NAMEOID)
-				prodesc->result_elem = 0;
-			else
+			/* is return type an array? */
+			if (isArrayTypeName(NameStr(typeStruct->typname)))
 				prodesc->result_elem = typeStruct->typelem;
+			else if (prodesc->result_typid == ANYARRAYOID)
+			{
+				/* polymorphic array type */
+				Oid		functypeid = fcinfo->actualRetType;
+
+				if (isArrayTypeName(get_typename(functypeid)))
+					prodesc->result_elem = get_typelem(functypeid);
+				else
+					prodesc->result_elem = get_arraytype(functypeid);
+			}
+			else	/* not ant array */
+				prodesc->result_elem = 0;
 
 			ReleaseSysCache(typeTup);
 
@@ -692,20 +709,24 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 			prodesc->nargs = procStruct->pronargs;
 			for (i = 0; i < prodesc->nargs; i++)
 			{
+				prodesc->arg_typid[i] = procStruct->proargtypes[i];
+
 				typeTup = SearchSysCache(TYPEOID,
-							ObjectIdGetDatum(procStruct->proargtypes[i]),
+							ObjectIdGetDatum(prodesc->arg_typid[i]),
 										 0, 0, 0);
 				if (!HeapTupleIsValid(typeTup))
 				{
 					xpfree(prodesc->proname);
 					xpfree(prodesc);
 					elog(ERROR, "plr: cache lookup for argument type %u failed",
-						 procStruct->proargtypes[i]);
+						 prodesc->arg_typid[i]);
 				}
 				typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
 
 				/* Disallow pseudotype argument */
-				if (typeStruct->typtype == 'p')
+				if (typeStruct->typtype == 'p' &&
+					prodesc->arg_typid[i] != ANYARRAYOID &&
+					prodesc->arg_typid[i] != ANYELEMENTOID)
 				{
 					xpfree(prodesc->proname);
 					xpfree(prodesc);
@@ -718,14 +739,23 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 				else
 					prodesc->arg_is_rel[i] = 0;
 
-				prodesc->arg_typid[i] = procStruct->proargtypes[i];
 				perm_fmgr_info(typeStruct->typoutput, &(prodesc->arg_out_func[i]));
 
-				/* special case -- NAME looks like an array, but treat as a scalar */
-				if (prodesc->arg_typid[i] == NAMEOID)
-					prodesc->arg_elem[i] = 0;
-				else
+				/* is argument an array? */
+				if (isArrayTypeName(NameStr(typeStruct->typname)))
 					prodesc->arg_elem[i] = typeStruct->typelem;
+				else if (prodesc->arg_typid[i] == ANYARRAYOID)
+				{
+					/* polymorphic array type */
+					Oid		functypeid = fcinfo->actualRetType;
+
+					if (isArrayTypeName(get_typename(functypeid)))
+						prodesc->arg_elem[i] = get_typelem(functypeid);
+					else
+						prodesc->arg_elem[i] = get_arraytype(functypeid);
+				}
+				else	/* not ant array */
+					prodesc->arg_elem[i] = 0;
 
 				if (i > 0)
 					appendStringInfo(proc_internal_args, ",");

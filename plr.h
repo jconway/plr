@@ -71,6 +71,18 @@
 #undef ELOG_H
 #include "utils/elog.h"
 
+/* working with postgres 7.3 compatible sources */
+#if (CATALOG_VERSION_NO < 200303091)
+#define PG_VERSION_73_COMPAT
+#endif
+/*
+ * force PG_VERSION_73_COMPAT until first CATALOG_VERSION_NO bump
+ * after construct_md_array, et. al. gets committed
+ */
+#ifndef PG_VERSION_73_COMPAT
+/* #define PG_VERSION_73_COMPAT */
+#endif
+
 #ifdef DEBUGPROTECT
 #undef PROTECT
 #define PROTECT(s) \
@@ -181,6 +193,14 @@ extern Datum array(PG_FUNCTION_ARGS);
 extern Datum array_accum(PG_FUNCTION_ARGS);
 
 /* Postgres backend support functions */
+
+#ifdef PG_VERSION_73_COMPAT
+extern ArrayType *construct_md_array(Datum *elems, int ndims, int *dims,
+									 int *lbs, Oid elmtype, int elmlen,
+									 bool elmbyval, char elmalign);
+extern bool isArrayTypeName(const char *typeName);
+#endif /* PG_VERSION_73_COMPAT */
+
 extern char *get_load_self_ref_cmd(Oid funcid);
 extern void perm_fmgr_info(Oid functionId, FmgrInfo *finfo);
 extern void system_cache_lookup(Oid element_type, bool input, int *typlen,

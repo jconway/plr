@@ -61,49 +61,6 @@ static Tuplestorestate *get_generic_tuplestore(SEXP rval,
 											 bool retset);
 
 /*
- * check bogus catalog version 9200303091 (i.e. not 200303091) until
- * first CATALOG_VERSION_NO bump after construct_md_array gets committed
- */
-#if (CATALOG_VERSION_NO < 200303091)
-static ArrayType *
-construct_md_array(Datum *elems,
-				   int ndims,
-				   int *dims,
-				   int *lbs,
-				   Oid elmtype, int elmlen, bool elmbyval, char elmalign)
-{
-	int			ndatabytes;
-	int			nbytes;
-	ArrayType  *array = NULL;
-	ArrayType  *tmparray = NULL;
-	int			nelems = ArrayGetNItems(ndims, dims);
-
-	/* build up 1d array */
-	tmparray = construct_array(elems, nelems, elmtype, elmlen, elmbyval, elmalign);
-
-	if (tmparray != NULL)
-	{
-		/* convert it to a ndims-array */
-		ndatabytes = ARR_SIZE(tmparray) - ARR_OVERHEAD(1);
-		nbytes = ndatabytes + ARR_OVERHEAD(ndims);
-		array = (ArrayType *) palloc(nbytes);
-
-		array->size = nbytes;
-		array->ndim = ndims;
-		array->flags = 0;
-		array->elemtype = elmtype;
-		memcpy(ARR_DIMS(array), dims, ndims * sizeof(int));
-		memcpy(ARR_LBOUND(array), lbs, ndims * sizeof(int));
-		memcpy(ARR_DATA_PTR(array), ARR_DATA_PTR(tmparray), ndatabytes);
-
-		pfree(tmparray);
-	}
-
-	return array;
-}
-#endif /* CATALOG_VERSION_NO < 200303091 */
-
-/*
  * given a scalar pg value, convert to a one row R vector
  */
 SEXP
@@ -160,7 +117,6 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 			   *dim;
 	char	   *p;
 
-	/* only support one-dim arrays for the moment */
 	ndim = ARR_NDIM(v);
 	element_type = ARR_ELEMTYPE(v);
 	dim = ARR_DIMS(v);
@@ -190,7 +146,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 		nz = dim[2];
 	}
 	else
-		elog(ERROR, "plr: 3 (or more) dimension arrays are not yet supported as function arguments");
+		elog(ERROR, "plr: 4 (or more) dimension arrays are not yet supported as function arguments");
 
 	/* get new vector of the appropriate type and length */
 	PROTECT(result = get_r_vector(element_type, nitems));

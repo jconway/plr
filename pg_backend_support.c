@@ -49,6 +49,58 @@ static char *substitute_libpath_macro(const char *name);
 static char *find_in_dynamic_libpath(const char *basename);
 static bool file_exists(const char *name);
 
+#ifdef PG_VERSION_73_COMPAT
+ArrayType *
+construct_md_array(Datum *elems,
+				   int ndims,
+				   int *dims,
+				   int *lbs,
+				   Oid elmtype, int elmlen, bool elmbyval, char elmalign)
+{
+	int			ndatabytes;
+	int			nbytes;
+	ArrayType  *array = NULL;
+	ArrayType  *tmparray = NULL;
+	int			nelems = ArrayGetNItems(ndims, dims);
+
+	/* build up 1-D array */
+	tmparray = construct_array(elems, nelems, elmtype, elmlen, elmbyval, elmalign);
+
+	if (tmparray != NULL)
+	{
+		/* convert it to a ndims-array */
+		ndatabytes = ARR_SIZE(tmparray) - ARR_OVERHEAD(1);
+		nbytes = ndatabytes + ARR_OVERHEAD(ndims);
+		array = (ArrayType *) palloc(nbytes);
+
+		array->size = nbytes;
+		array->ndim = ndims;
+		array->flags = 0;
+		array->elemtype = elmtype;
+		memcpy(ARR_DIMS(array), dims, ndims * sizeof(int));
+		memcpy(ARR_LBOUND(array), lbs, ndims * sizeof(int));
+		memcpy(ARR_DATA_PTR(array), ARR_DATA_PTR(tmparray), ndatabytes);
+
+		pfree(tmparray);
+	}
+
+	return array;
+}
+
+/*
+ * isArrayTypeName(typeName)
+ *	  - given a type name determine if it is an array type name
+ * 
+ * this must be kept consistent with makeArrayTypeName() above
+ */
+bool
+isArrayTypeName(const char *typeName)
+{
+	return (typeName[0] == '_');
+}
+
+#endif /* PG_VERSION_73_COMPAT */
+
 static char *
 get_lib_pathstr(Oid funcid)
 {
