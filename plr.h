@@ -151,6 +151,7 @@ extern int Rf_initEmbeddedR(int argc, char **argv);
 
 /* PL/R language handler */
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
+extern void start_interp(void);
 extern void load_r_cmd(const char *cmd);
 extern SEXP call_r_func(SEXP fun, SEXP rargs);
 

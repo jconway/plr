@@ -198,7 +198,6 @@ typedef struct plr_hashent
 /*
  * static declarations
  */
-static void start_interp(void);
 static void plr_init_interp(Oid funcid);
 static void plr_init_all(Oid funcid);
 static void plr_init_load_modules(void);
@@ -284,15 +283,22 @@ load_r_cmd(const char *cmd)
 /*
  * start_interp() - start embedded R
  */
-static void
+void
 start_interp(void)
 {
+	char	   *r_home;
 	int			argc;
 	char	   *argv[] = {"PL/R", "--gui=none", "--silent", "--no-save"};
 
 	/* refuse to start more than once */
 	if (plr_interp_started == true)
 		return;
+
+	/* refuse to start if R_HOME is not defined */
+	r_home = getenv("R_HOME");
+	if (r_home == NULL)
+		elog(ERROR, "plr: cannot start interpreter unless R_HOME " \
+					"environment variable is defined");
 
 	argc = sizeof(argv)/sizeof(argv[0]);
 	Rf_initEmbeddedR(argc, argv);
