@@ -194,7 +194,13 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 	} while (0)
 
 #define CHECK_POLYMORPHIC_TYPES
-#define thisQueryContext	QueryContext
+
+#define INIT_AUX_FMGR_ATTS \
+	do { \
+		finfo->fn_mcxt = QueryContext; \
+	} while (0)
+
+#define palloc0(sz_)	palloc(sz_)
 
 #else
 /*************************************************************************
@@ -251,10 +257,11 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 		} \
 	} while (0)
 
-#define thisQueryContext        MessageContext
-#undef thisQueryContext /* temporary until Tom's mcxt changes are committed */
-#define thisQueryContext        QueryContext
-
+#define INIT_AUX_FMGR_ATTS \
+	do { \
+		finfo->fn_mcxt = QueryContext; \
+		finfo->fn_expr = (Node *) NULL; \
+	} while (0)
 
 #endif /* PG_VERSION_73_COMPAT */
 

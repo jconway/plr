@@ -37,6 +37,8 @@ RETURNS SETOF plr_environ_type
 AS 'MODULE_PATHNAME','plr_environ'
 LANGUAGE 'C';
 
+REVOKE EXECUTE ON FUNCTION plr_environ() FROM PUBLIC;
+
 CREATE TYPE r_typename AS (typename text, typeoid oid);
 CREATE OR REPLACE FUNCTION r_typenames()
 RETURNS SETOF r_typename AS '

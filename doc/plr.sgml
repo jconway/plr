@@ -56,13 +56,11 @@
 
   <note>
    <para>
-   PL/R should build cleanly with PostgreSQL 7.3.x. It was developed using libR
-   from R 1.6.2 under Red Hat 7.3 & 8.0.
-   </para>
-
-   <para>
-   PL/R has also passed its regression test with PostgreSQL 7.4devel and
-   R 1.7devel under Red Hat 7.3 & 8.0.
+   PL/R should build cleanly with PostgreSQL 7.3.x, and 7.4devel. It was
+   initially developed using libR from R 1.6.2 under Red Hat 7.3 & 8.0. PL/R
+   has also passed its regression test with R 1.7.0 under Red Hat 7.3 & 8.0.
+   On Red Hat 9, the R-patched (R 1.7.0 with subsequent release 1.7.x patches)
+   distribution is required (and passes `make installcheck`).
    </para>
   </note>
 
@@ -790,7 +788,21 @@ select * from test_spi_execp('sp') as t(typeid oid, typename name);
      </varlistentry>
 
      <varlistentry>
-      <term><function>array</function>
+      <term><function>reload_plr_modules</function>
+           ()
+      </term>
+      <listitem>
+       <para>
+        Force re-loading of R code from the <literal>plr_modules</literal>
+        table. It is useful after modifying the contents of
+        <literal>plr_modules</literal>, so that the change will have an
+        immediate effect.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><function>plr_singleton_array</function>
            (<type>float8</type> <replaceable>first_element</replaceable>)
       </term>
       <listitem>
@@ -820,7 +832,7 @@ select array('hello','world');
      </varlistentry>
 
      <varlistentry>
-      <term><function>array_push</function>
+      <term><function>plr_array_push</function>
            (<type>float8[]</type> <replaceable>array</replaceable>,
             <type>float8</type> <replaceable>next_element</replaceable>)
       </term>
@@ -849,7 +861,7 @@ select array_push(array('hello','world'), 'how are you');
      </varlistentry>
 
      <varlistentry>
-      <term><function>array_accum</function>
+      <term><function>plr_array_accum</function>
            (<type>float8[]</type> <replaceable>state_value</replaceable>,
             <type>float8</type> <replaceable>next_element</replaceable>)
       </term>
@@ -896,6 +908,19 @@ select array_accum('{23,35}', 42);
        </para>
       </listitem>
      </varlistentry>
+
+     <varlistentry>
+      <term><function>plr_environ</function>()</term>
+      <listitem>
+       <para>
+        Displays the environment under which the Postmaster is currently
+        running. This may be useful to debug issues related to R specific
+        environment variables. This function is installed with EXECUTE
+        permission revoked from PUBLIC.
+       </para>
+      </listitem>
+     </varlistentry>
+
     </variablelist>
  </chapter>
 

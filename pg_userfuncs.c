@@ -295,7 +295,7 @@ plr_environ(PG_FUNCTION_ARGS)
 	rsinfo->returnMode = SFRM_Materialize;
 
 	/* initialize our tuplestore */
-	tupstore = tuplestore_begin_heap(true, false, SortMem);
+	tupstore = TUPLESTORE_BEGIN_HEAP;
 
 	for (current_env = environ;
 		 current_env != NULL && *current_env != NULL;
