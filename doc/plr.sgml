@@ -1,4 +1,4 @@
-<!doctype book PUBLIC "-//OASIS//DTD DocBook V3.1//EN">
+<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook V4.2//EN">
 <book>
  <title>PL/R User's Guide - R Procedural Language</title>
  <bookinfo>
@@ -102,9 +102,12 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
     when it was configured, in order for the libR shared object library to be
     available.
    </para>
-  </tip>
-
-  <tip>
+   <para>
+    Additionally, libR must be findable by your runtime linker.
+    On Linux, this involves adding an entry in /etc/ld.so.conf for the
+    location of libR (typically $R_HOME/bin), and then running ldconfig.
+    Refer to <literal>man ldconfig</literal> or its equivalent for your system.
+   </para>
    <para>
     R_HOME must be defined in the environment of the user under which
     PostgreSQL is started, <emphasis>before</emphasis> the postmaster
@@ -144,6 +147,18 @@ CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS '
        return(arg1)
     else
        return(arg2)
+' LANGUAGE 'plr' STRICT;
+    </programlisting>
+
+    Starting with PostgreSQL 7.5 (or whatever the next major release after 7.4
+    ends up being called), arguments may be explicitly named when creating a
+    function. If an argument is explicitly named at function creation time,
+    that name will be available to your R script in place of the usual
+    <literal>argN</literal> variable. For example:
+
+    <programlisting>
+CREATE OR REPLACE FUNCTION sd(vals float8[]) RETURNS float AS '
+    sd(vals)
 ' LANGUAGE 'plr' STRICT;
     </programlisting>
 
@@ -578,7 +593,7 @@ SELECT row_number(), f1 from t;
         If a field of a SELECT result is NULL, the target variable for it
         is set to <quote>NA</quote>. For example:
         <programlisting>
-create or replace function test_spi_tup(text) returns record as '
+create or replace function test_spi_tup(text) returns setof record as '
   pg.spi.exec(arg1)
 ' language 'plr';
 
@@ -619,7 +634,16 @@ select * from test_spi_tup('select oid, NULL::text as nullcol,
         by the type Oids, shown in pg_type. Global variables are provided for
         this use. They are named according to the convention TYPENAMEOID, where
         the actual name of the type, in all capitals, is substituted for
-        TYPENAME. A support function, <function>r_typenames()</function> can be
+        TYPENAME. A support function, <function>load_r_typenames()</function>
+        must be used to make the predefined global variables available for use:
+        <programlisting>
+select load_r_typenames();
+ load_r_typenames
+------------------
+ OK
+(1 row)
+        </programlisting>
+        Another support function, <function>r_typenames()</function> may be
         used to list the predefined Global variables:
         <programlisting>
 select * from r_typenames();
@@ -682,7 +706,7 @@ select test_spi_prep('select oid, typname from pg_type
  OK
 (1 row)
 
-create or replace function test_spi_execp(text, text, text) returns record as '
+create or replace function test_spi_execp(text, text, text) returns setof record as '
   pg.spi.execp(pg.reval(arg1), list(arg2,arg3))
 ' language 'plr';
 

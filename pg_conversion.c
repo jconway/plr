@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003 by Joseph E. Conway
+ * Copyright (c) 2003, 2004 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -258,7 +258,7 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 			continue;
 
 		/* set column name */
-		SET_STRING_ELT(names, df_colnum, mkChar(SPI_fname(tupdesc, j + 1)));
+		SET_COLUMN_NAMES;
 
 		/* get column datatype oid */
 		element_type = SPI_gettypeid(tupdesc, j + 1);

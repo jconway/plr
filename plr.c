@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003 by Joseph E. Conway
+ * Copyright (c) 2003, 2004 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -32,6 +32,7 @@
  */
 #include "plr.h"
 #include "storage/ipc.h"
+#include "utils/typcache.h"
 
 /*
  * Global data
@@ -115,6 +116,10 @@ static plr_function *do_compile(FunctionCallInfo fcinfo,
 static SEXP plr_parse_func_body(const char *body);
 static SEXP plr_convertargs(plr_function *function, Datum *arg, bool *argnull);
 static void plr_error_callback(void *arg);
+
+#ifdef PG_VERSION_75_COMPAT
+static char **fetchArgNames(HeapTuple procTup, int nargs);
+#endif /* PG_VERSION_75_COMPAT */
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -448,13 +453,12 @@ plr_trigger_handler(PG_FUNCTION_ARGS)
 	bool			argnull[FUNC_MAX_ARGS];
 	TriggerData	   *trigdata = (TriggerData *) fcinfo->context;
 	TupleDesc		tupdesc = trigdata->tg_relation->rd_att;
-	TupleTableSlot *slot;
 	Datum			dvalues[trigdata->tg_trigger->tgnargs];
 	ArrayType	   *array;
 	int				ndims = 1;
 	int				dims[ndims];
 	int				lbs[ndims];
-
+	TRIGGERTUPLEVARS;
 	ERRORCONTEXTCALLBACK;
 	int				i;
 
@@ -526,43 +530,11 @@ plr_trigger_handler(PG_FUNCTION_ARGS)
 				 CStringGetDatum("ROW"));
 
 		if (TRIGGER_FIRED_BY_INSERT(trigdata->tg_event))
-		{
-			arg[5] = DirectFunctionCall1(textin, CStringGetDatum("INSERT"));
-
-			slot = TupleDescGetSlot(tupdesc);
-			slot->val = trigdata->tg_trigtuple;
-			arg[6] = PointerGetDatum(slot);
-			argnull[6] = false;
-
-			arg[7] = (Datum) 0;
-			argnull[7] = true;
-		}
+			SET_INSERT_ARGS_567;
 		else if (TRIGGER_FIRED_BY_DELETE(trigdata->tg_event))
-		{
-			arg[5] = DirectFunctionCall1(textin, CStringGetDatum("DELETE"));
-
-			arg[6] = (Datum) 0;
-			argnull[6] = true;
-
-			slot = TupleDescGetSlot(tupdesc);
-			slot->val = trigdata->tg_trigtuple;
-			arg[7] = PointerGetDatum(slot);
-			argnull[7] = false;
-		}
+			SET_DELETE_ARGS_567;
 		else if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event))
-		{
-			arg[5] = DirectFunctionCall1(textin, CStringGetDatum("UPDATE"));
-
-			slot = TupleDescGetSlot(tupdesc);
-			slot->val = trigdata->tg_newtuple;
-			arg[6] = PointerGetDatum(slot);
-			argnull[6] = false;
-
-			slot = TupleDescGetSlot(tupdesc);
-			slot->val = trigdata->tg_trigtuple;
-			arg[7] = PointerGetDatum(slot);
-			argnull[7] = false;
-		}
+			SET_UPDATE_ARGS_567;
 		else
 			/* internal error */
 			elog(ERROR, "unrecognized tg_event");
@@ -947,6 +919,7 @@ do_compile(FunctionCallInfo fcinfo,
 	if (!is_trigger)
 	{
 		int		i;
+		GET_ARG_NAMES;
 
 		function->nargs = procStruct->pronargs;
 		for (i = 0; i < function->nargs; i++)
@@ -998,7 +971,7 @@ do_compile(FunctionCallInfo fcinfo,
 
 			if (i > 0)
 				appendStringInfo(proc_internal_args, ",");
-			appendStringInfo(proc_internal_args, "arg%d", i + 1);
+			SET_ARG_NAME;
 
 			ReleaseSysCache(typeTup);
 
@@ -1024,6 +997,7 @@ do_compile(FunctionCallInfo fcinfo,
 				function->arg_elem_typalign[i] = typalign;
 			}
 		}
+		FREE_ARG_NAMES;
 	}
 	else
 	{
@@ -1256,11 +1230,7 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull)
 		else if (function->arg_is_rel[i])
 		{
 			/* for tuple args, convert to a one row data.frame */
-			TupleTableSlot *slot = (TupleTableSlot *) arg[i];
-			HeapTuple		tuples = slot->val;
-			TupleDesc		tupdesc = slot->ttc_tupleDescriptor;
-
-			PROTECT(el = pg_tuple_get_r_frame(1, &tuples, tupdesc));
+			CONVERT_TUPLE_TO_DATAFRAME;
 		}
 		else if (function->arg_elem[i] == 0)
 		{
@@ -1301,3 +1271,44 @@ plr_error_callback(void *arg)
 	if (arg)
 		errcontext("In PL/R function %s", (char *) arg);
 }
+
+#ifdef PG_VERSION_75_COMPAT
+/*
+ * Fetch the argument names, if any, from the proargnames field of the
+ * pg_proc tuple.  Results are palloc'd.
+ *
+ * Borrowed from src/pl/plpgsql/src/pl_comp.c
+ */
+static char **
+fetchArgNames(HeapTuple procTup, int nargs)
+{
+	Datum		argnamesDatum;
+	bool		isNull;
+	Datum	   *elems;
+	int			nelems;
+	char	  **result;
+	int			i;
+
+	if (nargs == 0)
+		return NULL;
+
+	argnamesDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proargnames,
+									&isNull);
+	if (isNull)
+		return NULL;
+
+	deconstruct_array(DatumGetArrayTypeP(argnamesDatum),
+					  TEXTOID, -1, false, 'i',
+					  &elems, &nelems);
+
+	if (nelems != nargs)		/* should not happen */
+		elog(ERROR, "proargnames must have the same number of elements as the function has arguments");
+
+	result = (char **) palloc(sizeof(char *) * nargs);
+
+	for (i=0; i < nargs; i++)
+		result[i] = DatumGetCString(DirectFunctionCall1(textout, elems[i]));
+
+	return result;
+}
+#endif /* PG_VERSION_75_COMPAT */

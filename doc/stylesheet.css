@@ -44,10 +44,14 @@ DIV.EXAMPLE {
 }
 
 .NAVHEADER TH	{ font-style: italic; }
+.COMMENT	{ color: red; }
+
+VAR		{ font-family: monospace; font-style: inherit; }
+/* Konqueror's standard style for ACRONYM is italic. */
+ACRONYM		{ font-style: inherit; }
 
 LI { font-family: helvetica,arial,sans-serif;  }
 BIG { text-decoration: none; font-family: helvetica,arial,sans-serif; font-weight: bold; font-size: 14px; }
 SMALL { text-decoration: none; font-family: helvetica,arial,sans-serif; font-weight: normal; font-size: 10px; }
 ol, ul, p, body, td, tr, th, form, span, div { font-family: helvetica,arial,sans-serif; font-size: 12px; }
 h1, h2, h3, h4, h5, h6 { font-family: helvetica,arial,sans-serif; }
-

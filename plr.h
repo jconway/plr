@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003 by Joseph E. Conway
+ * Copyright (c) 2003, 2004 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -127,10 +127,36 @@
 /*
  * R version is calculated thus:
  *   Maj * 65536 + Minor * 256 + Build * 1
- * So version 1.8.0 results in:
- *   1   * 65536 + 8     * 256 + 0     * 1 == 67584
+ * So:
+ * version 1.8.0 results in:
+ *   (1 * 65536) + (8 * 256) + (0 * 1) == 67584
+ * version 1.9.0 results in:
+ *   (1 * 65536) + (9 * 256) + (0 * 1) == 67840
  */
-#if (R_VERSION < 67584)
+#if (R_VERSION < 67840) /* R_VERSION < 1.9.0 */
+#define SET_COLUMN_NAMES \
+	do { \
+		int i; \
+		char *names_buf; \
+		names_buf = SPI_fname(tupdesc, j + 1); \
+		for (i = 0; i < strlen(names_buf); i++) { \
+			if (names_buf[i] == '_') \
+				names_buf[i] = '.'; \
+		} \
+		SET_STRING_ELT(names, df_colnum, mkChar(names_buf)); \
+		pfree(names_buf); \
+	} while (0)
+#else /* R_VERSION >= 1.9.0 */
+#define SET_COLUMN_NAMES \
+	do { \
+		char *names_buf; \
+		names_buf = SPI_fname(tupdesc, j + 1); \
+		SET_STRING_ELT(names, df_colnum, mkChar(names_buf)); \
+		pfree(names_buf); \
+	} while (0)
+#endif
+
+#if (R_VERSION < 67584) /* R_VERSION < 1.8.0 */
 /*
  * See the non-exported header file ${R_HOME}/src/include/Parse.h
  */
@@ -226,7 +252,6 @@ typedef enum IOFuncSelector
 
 #define ANYELEMENTOID	2283
 
-#define INIT_FINFO_FUNCEXPR
 #define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, SortMem)
 #define INIT_AUX_FMGR_ATTS \
 	do { \
@@ -254,17 +279,153 @@ typedef enum IOFuncSelector
 
 #endif /* PG_VERSION_73_COMPAT */
 
-#ifndef PG_VERSION_75_COMPAT
-
-#define  PLR_CLEANUP \
-	plr_cleanup(void)
-
-#else
-
+#ifdef PG_VERSION_75_COMPAT
+/*************************************************************************
+ * working with postgres 7.5 compatible sources
+ *************************************************************************/
 #define  PLR_CLEANUP \
 	plr_cleanup(int code, Datum arg)
-
-#endif /* not PG_VERSION_75_COMPAT */
+#define TRIGGERTUPLEVARS \
+	HeapTuple		tup; \
+	HeapTupleHeader	dnewtup; \
+	HeapTupleHeader	dtrigtup
+#define SET_INSERT_ARGS_567 \
+	do { \
+		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("INSERT")); \
+		tup = trigdata->tg_trigtuple; \
+		dtrigtup = (HeapTupleHeader) palloc(tup->t_len); \
+		memcpy((char *) dtrigtup, (char *) tup->t_data, tup->t_len); \
+		HeapTupleHeaderSetDatumLength(dtrigtup, tup->t_len); \
+		HeapTupleHeaderSetTypeId(dtrigtup, tupdesc->tdtypeid); \
+		HeapTupleHeaderSetTypMod(dtrigtup, tupdesc->tdtypmod); \
+		arg[6] = PointerGetDatum(dtrigtup); \
+		argnull[6] = false; \
+		arg[7] = (Datum) 0; \
+		argnull[7] = true; \
+	} while (0)
+#define SET_DELETE_ARGS_567 \
+	do { \
+		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("DELETE")); \
+		arg[6] = (Datum) 0; \
+		argnull[6] = true; \
+		tup = trigdata->tg_trigtuple; \
+		dtrigtup = (HeapTupleHeader) palloc(tup->t_len); \
+		memcpy((char *) dtrigtup, (char *) tup->t_data, tup->t_len); \
+		HeapTupleHeaderSetDatumLength(dtrigtup, tup->t_len); \
+		HeapTupleHeaderSetTypeId(dtrigtup, tupdesc->tdtypeid); \
+		HeapTupleHeaderSetTypMod(dtrigtup, tupdesc->tdtypmod); \
+		arg[7] = PointerGetDatum(dtrigtup); \
+		argnull[7] = false; \
+	} while (0)
+#define SET_UPDATE_ARGS_567 \
+	do { \
+		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("UPDATE")); \
+		tup = trigdata->tg_newtuple; \
+		dnewtup = (HeapTupleHeader) palloc(tup->t_len); \
+		memcpy((char *) dnewtup, (char *) tup->t_data, tup->t_len); \
+		HeapTupleHeaderSetDatumLength(dnewtup, tup->t_len); \
+		HeapTupleHeaderSetTypeId(dnewtup, tupdesc->tdtypeid); \
+		HeapTupleHeaderSetTypMod(dnewtup, tupdesc->tdtypmod); \
+		arg[6] = PointerGetDatum(dnewtup); \
+		argnull[6] = false; \
+		tup = trigdata->tg_trigtuple; \
+		dtrigtup = (HeapTupleHeader) palloc(tup->t_len); \
+		memcpy((char *) dtrigtup, (char *) tup->t_data, tup->t_len); \
+		HeapTupleHeaderSetDatumLength(dtrigtup, tup->t_len); \
+		HeapTupleHeaderSetTypeId(dtrigtup, tupdesc->tdtypeid); \
+		HeapTupleHeaderSetTypMod(dtrigtup, tupdesc->tdtypmod); \
+		arg[7] = PointerGetDatum(dtrigtup); \
+		argnull[7] = false; \
+	} while (0)
+#define CONVERT_TUPLE_TO_DATAFRAME \
+	do { \
+		Oid			tupType; \
+		int32		tupTypmod; \
+		TupleDesc	tupdesc; \
+		HeapTuple	tuple = palloc(sizeof(HeapTupleData)); \
+		HeapTupleHeader	tuple_hdr = DatumGetHeapTupleHeader(arg[i]); \
+		tupType = HeapTupleHeaderGetTypeId(tuple_hdr); \
+		tupTypmod = HeapTupleHeaderGetTypMod(tuple_hdr); \
+		tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod); \
+		tuple->t_len = HeapTupleHeaderGetDatumLength(tuple_hdr); \
+		ItemPointerSetInvalid(&(tuple->t_self)); \
+		tuple->t_tableOid = InvalidOid; \
+		tuple->t_data = tuple_hdr; \
+		PROTECT(el = pg_tuple_get_r_frame(1, &tuple, tupdesc)); \
+		pfree(tuple); \
+	} while (0)
+#define GET_ARG_NAMES \
+		char  **argnames; \
+		argnames = fetchArgNames(procTup, procStruct->pronargs)
+#define SET_ARG_NAME \
+	do { \
+		if (argnames && argnames[i] && argnames[i][0]) \
+		{ \
+			appendStringInfo(proc_internal_args, "%s", argnames[i]); \
+			pfree(argnames[i]); \
+		} \
+		else \
+			appendStringInfo(proc_internal_args, "arg%d", i + 1); \
+	} while (0)
+#define FREE_ARG_NAMES \
+	do { \
+		if (argnames) \
+			pfree(argnames); \
+	} while (0)
+#else
+/*************************************************************************
+ * working with earlier than postgres 7.5 compatible sources
+ *************************************************************************/
+#define  PLR_CLEANUP \
+	plr_cleanup(void)
+#define TRIGGERTUPLEVARS \
+	TupleTableSlot *slot
+#define SET_INSERT_ARGS_567 \
+	do { \
+		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("INSERT")); \
+		slot = TupleDescGetSlot(tupdesc); \
+		slot->val = trigdata->tg_trigtuple; \
+		arg[6] = PointerGetDatum(slot); \
+		argnull[6] = false; \
+		arg[7] = (Datum) 0; \
+		argnull[7] = true; \
+	} while (0)
+#define SET_DELETE_ARGS_567 \
+	do { \
+		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("DELETE")); \
+		arg[6] = (Datum) 0; \
+		argnull[6] = true; \
+		slot = TupleDescGetSlot(tupdesc); \
+		slot->val = trigdata->tg_trigtuple; \
+		arg[7] = PointerGetDatum(slot); \
+		argnull[7] = false; \
+	} while (0)
+#define SET_UPDATE_ARGS_567 \
+	do { \
+		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("UPDATE")); \
+		slot = TupleDescGetSlot(tupdesc); \
+		slot->val = trigdata->tg_newtuple; \
+		arg[6] = PointerGetDatum(slot); \
+		argnull[6] = false; \
+		slot = TupleDescGetSlot(tupdesc); \
+		slot->val = trigdata->tg_trigtuple; \
+		arg[7] = PointerGetDatum(slot); \
+		argnull[7] = false; \
+	} while (0)
+#define CONVERT_TUPLE_TO_DATAFRAME \
+	do { \
+		TupleTableSlot *slot = (TupleTableSlot *) arg[i]; \
+		HeapTuple		tuple = slot->val; \
+		TupleDesc		tupdesc = slot->ttc_tupleDescriptor; \
+		PROTECT(el = pg_tuple_get_r_frame(1, &tuple, tupdesc)); \
+	} while (0)
+#define GET_ARG_NAMES
+#define SET_ARG_NAME \
+	do { \
+		appendStringInfo(proc_internal_args, "arg%d", i + 1); \
+	} while (0)
+#define FREE_ARG_NAMES
+#endif /* PG_VERSION_75_COMPAT */
 
 /*
  * structs
