@@ -158,6 +158,8 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 #define ERRORCONTEXTCALLBACK
 #define PUSH_PLERRCONTEXT
 #define POP_PLERRCONTEXT
+#define SAVE_PLERRCONTEXT
+#define RESTORE_PLERRCONTEXT
 
 #else
 /*************************************************************************
@@ -174,10 +176,10 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 #define ERRORCONTEXTCALLBACK \
 	ErrorContextCallback	plerrcontext
 
-#define PUSH_PLERRCONTEXT \
+#define PUSH_PLERRCONTEXT(_error_callback_, _plr_error_funcname_) \
 	do { \
-		plerrcontext.callback = plr_error_callback; \
-		plerrcontext.arg = NULL; \
+		plerrcontext.callback = _error_callback_; \
+		plerrcontext.arg = (void *) pstrdup(_plr_error_funcname_); \
 		plerrcontext.previous = error_context_stack; \
 		error_context_stack = &plerrcontext; \
 	} while (0)
@@ -185,7 +187,17 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 #define POP_PLERRCONTEXT \
 	do { \
 		error_context_stack = plerrcontext.previous; \
-		plr_error_funcname = NULL; \
+	} while (0)
+
+#define SAVE_PLERRCONTEXT \
+	do { \
+		plerrcontext.previous = error_context_stack; \
+		error_context_stack = NULL; \
+	} while (0)
+
+#define RESTORE_PLERRCONTEXT \
+	do { \
+		error_context_stack = plerrcontext.previous; \
 	} while (0)
 
 #endif /* PG_VERSION_73_COMPAT */

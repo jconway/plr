@@ -35,6 +35,7 @@
 extern MemoryContext plr_SPI_context;
 
 static SEXP rpgsql_get_results(int ntuples, SPITupleTable *tuptable);
+static void rsupport_error_callback(void *arg);
 
 /* The information we cache prepared plans */
 typedef struct saved_plan_desc
@@ -52,19 +53,31 @@ typedef struct saved_plan_desc
 void
 throw_pg_notice(const char **msg)
 {
+	/* skip error CONTEXT for explicitly called messages */
+	ERRORCONTEXTCALLBACK;
+	SAVE_PLERRCONTEXT;
+
 	if (msg && *msg)
 		elog(NOTICE, "%s", *msg);
 	else
 		elog(NOTICE, "%s", "");
+
+	RESTORE_PLERRCONTEXT;
 }
 
 void
 throw_pg_error(const char **msg)
 {
+	/* skip error CONTEXT for explicitly called messages */
+	ERRORCONTEXTCALLBACK;
+	SAVE_PLERRCONTEXT;
+
 	if (msg && *msg)
 		elog(ERROR, "%s", *msg);
 	else
 		elog(ERROR, "%s", "");
+
+	RESTORE_PLERRCONTEXT;
 }
 
 /*
@@ -136,6 +149,10 @@ plr_SPI_exec(SEXP rsql)
 	int				ntuples;
 	SEXP			result = NULL;
 	MemoryContext	oldcontext;
+	ERRORCONTEXTCALLBACK;
+
+	/* set up error context */
+	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.exec");
 
 	PROTECT(rsql =  AS_CHARACTER(rsql));
 	sql = CHAR(STRING_ELT(rsql, 0));
@@ -213,7 +230,9 @@ plr_SPI_exec(SEXP rsql)
 		SPI_freetuptable(SPI_tuptable);
 	}
 	else
-		return(R_NilValue);
+		result = R_NilValue;
+
+	POP_PLERRCONTEXT;
 
 	return result;
 }
@@ -221,15 +240,25 @@ plr_SPI_exec(SEXP rsql)
 static SEXP
 rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 {
+	SEXP	result;
+	ERRORCONTEXTCALLBACK;
+
+	/* set up error context */
+	PUSH_PLERRCONTEXT(rsupport_error_callback, "rpgsql_get_results");
+
 	if (tuptable != NULL)
 	{
 		HeapTuple	   *tuples = tuptable->vals;
 		TupleDesc		tupdesc = tuptable->tupdesc;
 
-		return pg_tuple_get_r_frame(ntuples, tuples, tupdesc);
+		result = pg_tuple_get_r_frame(ntuples, tuples, tupdesc);
 	}
 	else
-		return(R_NilValue);
+		result = R_NilValue;
+
+	POP_PLERRCONTEXT;
+
+	return result;
 }
 
 /*
@@ -249,6 +278,10 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	saved_plan_desc	   *plan_desc;
 	SEXP				result;
 	MemoryContext		oldcontext;
+	ERRORCONTEXTCALLBACK;
+
+	/* set up error context */
+	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.prepare");
 
 	/* switch to long lived context to create plan description */
 	oldcontext = MemoryContextSwitchTo(TopMemoryContext);
@@ -405,6 +438,8 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 
 	result = R_MakeExternalPtr(plan_desc, R_NilValue, R_NilValue);
 
+	POP_PLERRCONTEXT;
+
 	return result;
 }
 
@@ -430,6 +465,10 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	int					ntuples;
 	SEXP				result;
 	MemoryContext		oldcontext;
+	ERRORCONTEXTCALLBACK;
+
+	/* set up error context */
+	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.execp");
 
 	if (nargs > 0)
 	{
@@ -529,7 +568,9 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 		SPI_freetuptable(SPI_tuptable);
 	}
 	else
-		return(R_NilValue);
+		result = R_NilValue;
+
+	POP_PLERRCONTEXT;
 
 	return result;
 }
@@ -547,4 +588,14 @@ plr_SPI_lastoid(void)
 	UNPROTECT(1);
 
 	return result;
+}
+
+/*
+ * error context callback to let us supply a call-stack traceback
+ */
+static void
+rsupport_error_callback(void *arg)
+{
+	if (arg)
+		errcontext("In R support function %s", (char *) arg);
 }

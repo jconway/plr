@@ -41,7 +41,6 @@ HTAB *plr_HashTable = (HTAB *) NULL;
 static bool plr_firstcall = true;
 static bool	plr_interp_started = false;
 static FunctionCallInfo plr_current_fcinfo = NULL;
-static char *plr_error_funcname;
 
 /*
  * defines
@@ -438,7 +437,8 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	/* Find or compile the function */
 	function = compile_plr_function(fcinfo);
 
-	PUSH_PLERRCONTEXT;
+	/* set up error context */
+	PUSH_PLERRCONTEXT(plr_error_callback, function->proname);
 
 	PROTECT(fun = function->fun);
 
@@ -489,11 +489,8 @@ compile_plr_function(FunctionCallInfo fcinfo)
 		elog(ERROR, "plpgsql: cache lookup for proc %u failed", funcOid);
 	procStruct = (Form_pg_proc) GETSTRUCT(procTup);
 
-	/*
-	 * grab copy of the function name into global variable for error callback
-	 */
-	plr_error_funcname = pstrdup(NameStr(procStruct->proname));
-	PUSH_PLERRCONTEXT;
+	/* set up error context */
+	PUSH_PLERRCONTEXT(plr_error_callback, NameStr(procStruct->proname));
 
 	/*
 	 * See if there's already a cache entry for the current FmgrInfo.
@@ -618,7 +615,7 @@ do_compile(FunctionCallInfo fcinfo,
 		elog(ERROR, "plr: out of memory");
 	MemSet(function, 0, sizeof(plr_function));
 
-	function->proname = pstrdup(internal_proname);
+	function->proname = pstrdup(proname);
 	function->fn_xmin = HeapTupleHeaderGetXmin(procTup->t_data);
 	function->fn_cmin = HeapTupleHeaderGetCmin(procTup->t_data);
 
@@ -994,6 +991,6 @@ plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
 static void
 plr_error_callback(void *arg)
 {
-	if (plr_error_funcname)
-		errcontext("compile of PL/R function %s", plr_error_funcname);
+	if (arg)
+		errcontext("In PL/R function %s", (char *) arg);
 }
