@@ -163,6 +163,7 @@ extern Datum r_get_pg(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo
 extern Datum get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem, bool *isnull);
 
 /* Postgres support functions installed into the R interpreter */
+extern void throw_pg_notice(const char **msg);
 extern void throw_pg_error(const char **msg);
 extern SEXP plr_quote_literal(SEXP rawstr);
 extern SEXP plr_quote_ident(SEXP rawstr);

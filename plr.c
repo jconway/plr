@@ -49,11 +49,14 @@ static HTAB *plr_HashTable;
 #define MAX_PRONAME_LEN		64
 #define FUNCS_PER_USER		64
 #define OPTIONS_NULL_CMD	"options(error = expression(NULL))"
+#define THROWNOTICE_CMD \
+			"pg.thrownotice <-function(msg) " \
+			"{.C(\"throw_pg_notice\", as.character(msg))}"
+#define OPTIONS_THROWNOTICE_CMD \
+			"options(error = expression(pg.thrownotice(geterrmessage())))"
 #define THROWERROR_CMD \
 			"pg.throwerror <-function(msg) " \
 			"{.C(\"throw_pg_error\", as.character(msg))}"
-#define OPTIONS_THROWERROR_CMD \
-			"options(error = expression(pg.throwerror(geterrmessage())))"
 #define QUOTE_LITERAL_CMD \
 			"pg.quoteliteral <-function(sql) " \
 			"{.Call(\"plr_quote_literal\", sql)}"
@@ -130,6 +133,15 @@ static HTAB *plr_HashTable;
 #define SPI_LASTOID_CMD \
 			"pg.spi.lastoid <-function() " \
 			"{.Call(\"plr_SPI_lastoid\")}"
+#define SPI_FACTOR_CMD \
+			"pg.spi.factor <- function(arg1) {\n" \
+			"  for (col in 1:ncol(arg1)) {\n" \
+			"    if (!is.numeric(arg1[,col])) {\n" \
+			"      arg1[,col] <- factor(arg1[,col])\n" \
+			"    }\n" \
+			"  }\n" \
+			"  return(arg1)\n" \
+			"}"
 #define REVAL \
 			"pg.reval <- function(arg1) {eval(parse(text = arg1))}"
 
@@ -302,8 +314,9 @@ plr_init_interp(Oid funcid)
 		OPTIONS_NULL_CMD,
 
 		/* set up the postgres error handler in R */
+		THROWNOTICE_CMD,
+		OPTIONS_THROWNOTICE_CMD,
 		THROWERROR_CMD,
-		OPTIONS_THROWERROR_CMD,
 
 		/* install the commands for SPI support in the interpreter */
 		QUOTE_LITERAL_CMD,
@@ -313,6 +326,7 @@ plr_init_interp(Oid funcid)
 		SPI_PREPARE_CMD,
 		SPI_EXECP_CMD,
 		SPI_LASTOID_CMD,
+		SPI_FACTOR_CMD,
 
 		/* handy predefined R functions */
 		REVAL,
@@ -466,15 +480,12 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	/* Call the R function */
 	PROTECT(rvalue = call_r_func(fun, rargs));
 
-	/* convert the return value from an R object to a Datum */
-	if(rvalue != R_NilValue)
-		retval = r_get_pg(rvalue, prodesc, fcinfo);
-	else
-	{
-		/* return NULL if R code returned undef */
-		retval = (Datum) 0;
-		fcinfo->isnull = true;
-	}
+	/*
+	 * Convert the return value from an R object to a Datum.
+	 * We expect r_get_pg to do the right thing with missing or empty results.
+	 */
+	retval = r_get_pg(rvalue, prodesc, fcinfo);
+
 	UNPROTECT(3);
 
 	return retval;

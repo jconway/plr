@@ -51,9 +51,15 @@ typedef struct saved_plan_desc
  * Functions used in R
  *****************************************************************************/
 void
-throw_pg_error(const char **msg)
+throw_pg_notice(const char **msg)
 {
 	elog(NOTICE, "%s", *msg);
+}
+
+void
+throw_pg_error(const char **msg)
+{
+	elog(ERROR, "%s", *msg);
 }
 
 /*

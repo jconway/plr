@@ -207,34 +207,23 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 	int			j = 0;
 	Oid			element_type;
 	Oid			typelem;
-	SEXP		names = NULL;
-	SEXP		row_names = NULL;
+	SEXP		names;
+	SEXP		row_names;
+	SEXP		dims, frame_dims;
+	SEXP		frame_dimnames;
 	char		buf[256];
 	SEXP		result;
-	SEXP		fun, rargs;
 	SEXP		fldvec;
 
 	if (tuples == NULL || ntuples < 1)
 		return(R_NilValue);
 
-	/* get a reference to the R "factor" function */
-	PROTECT(fun = Rf_findFun(Rf_install("factor"), R_GlobalEnv));
-
-	/*
-	 * create an array of R objects with the number of elements
-	 * equal to the number of arguments needed by "factor".
-	 */
-	PROTECT(rargs = allocVector(VECSXP, 2));
-
-	/* the first arg to "factor" is NIL */
-	SET_VECTOR_ELT(rargs, 0, R_NilValue);
-
 	/*
 	 * Allocate the data.frame initially as a list,
 	 * and also allocate a names vector for the column names
 	 */
-	PROTECT(result = allocVector(VECSXP, nc));
-    PROTECT(names = allocVector(STRSXP, nc));
+	PROTECT(result = NEW_LIST(nc));
+    PROTECT(names = NEW_CHARACTER(nc));
 
 	/*
 	 * Loop by columns
@@ -308,53 +297,46 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 			}
 		}
 
-		/* convert column into a factor column if needed */
-		if (typelem == 0)
-		{
-			switch(element_type)
-			{
-				case OIDOID:
-				case INT2OID:
-				case INT4OID:
-				case INT8OID:
-				case FLOAT4OID:
-				case FLOAT8OID:
-				case CASHOID:
-				case NUMERICOID:
-				case BOOLOID:
-					/* do nothing */
-				    break;
-				default:
-					/* the second arg to "factor" is our character vector */
-					SET_VECTOR_ELT(rargs, 1, fldvec);
-
-					/* convert to a factor */
-					PROTECT(fldvec = call_r_func(fun, rargs));
-					UNPROTECT(1);
-			}
-		}
-
 		SET_VECTOR_ELT(result, j, fldvec);
 		UNPROTECT(1);
 	}
 
 	/* attach the column names */
     setAttrib(result, R_NamesSymbol, names);
-	UNPROTECT(3);
 
 	/* attach row names - basically just the row number, zero based */
 	PROTECT(row_names = allocVector(STRSXP, nr));
 	for (i=0; i<nr; i++)
 	{
 	    sprintf(buf, "%d", i+1);
-	    SET_STRING_ELT(row_names, i, mkChar(buf));
+	    SET_STRING_ELT(row_names, i, COPY_TO_USER_STRING(buf));
 	}
 	setAttrib(result, R_RowNamesSymbol, row_names);
+
+	/* attach dimensions */
+	PROTECT(frame_dims = allocVector(INTSXP, 2));
+	/* nr doesn't work for dim[0], the frame list is only 1 row */
+	INTEGER_DATA(frame_dims)[0] = 1;
+	INTEGER_DATA(frame_dims)[1] = nc;
+	setAttrib(result, R_DimSymbol, frame_dims);
+	UNPROTECT(1);
+
+	/* correct the number of rows */
+	PROTECT(dims = getAttrib(result, R_DimSymbol));
+	INTEGER(dims)[0] = nr;
+	UNPROTECT(1);
+
+	/* attach dimnames */
+	PROTECT(frame_dimnames = NEW_LIST(2));
+	SET_VECTOR_ELT(frame_dimnames, 0, row_names);
+	SET_VECTOR_ELT(frame_dimnames, 1, names);
+	setAttrib(result, R_DimNamesSymbol, frame_dimnames);
+	UNPROTECT(1);
 
 	/* finally, tell R we are a "data.frame" */
     setAttrib(result, R_ClassSymbol, mkString("data.frame"));
 
-	UNPROTECT(2);
+	UNPROTECT(3);
 	return result;
 }
 
@@ -440,17 +422,19 @@ r_get_pg(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 	bool	isnull = false;
 	Datum	result;
 
-	/* short circuit if return value is Null */
-	if (isNull(rval) || length(rval) == 0)
-	{
-		fcinfo->isnull = true;
-		return (Datum) 0;
-	}
-
 	if (prodesc->result_istuple)
 		result = get_tuplestore(rval, prodesc, fcinfo, &isnull);
 	else
 	{
+		/* short circuit if return value is Null */
+		if (rval == R_NilValue ||
+			isNull(rval) ||
+			length(rval) == 0)		/* probably redundant */
+		{
+			fcinfo->isnull = true;
+			return (Datum) 0;
+		}
+
 		if (prodesc->result_elem == 0)
 			result = get_scalar_datum(rval, prodesc->result_in_func, prodesc->result_elem, &isnull);
 		else
@@ -790,12 +774,11 @@ get_frame_tuplestore(SEXP rval,
 	char			  **values;
 	HeapTuple			tuple;
 	MemoryContext		oldcontext;
-	SEXP				obj;
 	int					i, j;
 	int					nr = 0;
 	int					nc = length(rval);
-	SEXP				dfcol = NULL,
-						orig_rval;
+	SEXP				dfcol;
+	SEXP				result;
 
 	/* switch to appropriate context to create the tuple store */
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
@@ -806,51 +789,78 @@ get_frame_tuplestore(SEXP rval,
 	MemoryContextSwitchTo(oldcontext);
 
 	/* get number of rows by examining the first column */
-	if (TYPEOF(rval) == VECSXP)
-		PROTECT(dfcol = VECTOR_ELT(rval, 0));
-	else if (TYPEOF(rval) == LISTSXP)
-		PROTECT(dfcol = CAR(rval));
-	else
-		elog(ERROR, "plr: bad internal representation of data.frame");
-
-	if (ATTRIB(dfcol) != R_NilValue)
-	{
-		UNPROTECT(1);
-		PROTECT(dfcol = CAR(ATTRIB(dfcol)));
-	}
-
+	PROTECT(dfcol = VECTOR_ELT(rval, 0));
 	nr = length(dfcol);
 	UNPROTECT(1);
 
+	/* coerce columns to character in advance */
+	PROTECT(result = NEW_LIST(nc));
+	for (j = 0; j < nc; j++)
+	{
+		PROTECT(dfcol = VECTOR_ELT(rval, j));
+		if(!isFactor(dfcol))
+		{
+			SEXP	obj;
+
+			PROTECT(obj = AS_CHARACTER(dfcol));
+			SET_VECTOR_ELT(result, j, obj);
+			UNPROTECT(1);
+		}
+		else
+		{
+			SEXP 	t;
+
+			for (t = ATTRIB(dfcol); t != R_NilValue; t = CDR(t))
+			{
+				if(TAG(t) == R_LevelsSymbol)
+				{
+					PROTECT(SETCAR(t, AS_CHARACTER(CAR(t))));
+					UNPROTECT(1);
+					break;
+				}
+			}
+			SET_VECTOR_ELT(result, j, dfcol);
+		}
+
+
+		UNPROTECT(1);
+	}
+
 	values = (char **) palloc(nc * sizeof(char *));
 
-	orig_rval = rval;
 	for(i = 0; i < nr; i++)
 	{
-		rval = orig_rval;
 		for (j = 0; j < nc; j++)
 		{
-			if (TYPEOF(rval) == VECSXP)
-				PROTECT(dfcol = VECTOR_ELT(rval, j));
-			else if (TYPEOF(rval) == LISTSXP)
+			PROTECT(dfcol = VECTOR_ELT(result, j));
+
+			if(isFactor(dfcol))
 			{
-				PROTECT(dfcol = CAR(rval));
-				rval = CDR(rval);
+				SEXP t;
+				for (t = ATTRIB(dfcol); t != R_NilValue; t = CDR(t))
+				{
+					if(TAG(t) == R_LevelsSymbol)
+					{
+						SEXP	obj;
+						int		idx = (int) VECTOR_ELT(dfcol, i);
+
+						PROTECT(obj = CAR(t));
+						values[j] = pstrdup(CHAR(STRING_ELT(obj, idx - 1)));
+						UNPROTECT(1);
+
+						break;
+					}
+				}
 			}
 			else
-				elog(ERROR, "plr: bad internal representation of data.frame");
+			{
+				if (STRING_ELT(dfcol, 0) != NA_STRING)
+					values[j] = pstrdup(CHAR(STRING_ELT(dfcol, i)));
+				else
+					values[j] = NULL;
+			}
 
-			if (ATTRIB(dfcol) == R_NilValue)
-				PROTECT(obj = AS_CHARACTER(dfcol));
-			else
-				PROTECT(obj = AS_CHARACTER(CAR(ATTRIB(dfcol))));
-
-			if (STRING_ELT(obj, 0) != NA_STRING)
-				values[j] = pstrdup(CHAR(STRING_ELT(obj, i)));
-			else
-				values[j] = NULL;
-
-			UNPROTECT(2);
+			UNPROTECT(1);
 		}
 
 		/* construct the tuple */

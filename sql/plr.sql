@@ -28,8 +28,8 @@ select pg_test_install('hello world');
 --
 -- a variety of plr functions
 --
-create or replace function throw_error(text) returns text as 'pg.throwerror(arg1)' language 'plr';
-select throw_error('hello');
+create or replace function throw_notice(text) returns text as 'pg.thrownotice(arg1)' language 'plr';
+select throw_notice('hello');
 
 create or replace function paste(_text,_text,text) returns text[] as 'paste(arg1,arg2, sep = arg3)' language 'plr';
 select paste('{hello, happy}','{world, birthday}',' ');

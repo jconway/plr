@@ -1,7 +1,7 @@
 # location of R library
-r_libdir = /usr/local/lib/R/bin/
+r_libdir = ${R_HOME}/bin
 # location of R includes
-r_includespec = /usr/local/lib/R/include
+r_includespec = ${R_HOME}/include
 
 subdir = src/pl/plr
 top_builddir = ../..
@@ -18,15 +18,17 @@ override CPPFLAGS := -I$(srcdir) -I$(r_includespec) $(CPPFLAGS)
 override CPPFLAGS += -DPKGLIBDIR=\"$(pkglibdir)\" -DDLSUFFIX=\"$(DLSUFFIX)\"
 rpath :=
 
-MAKEDOCS = ./pg_doc
-MODULE_big = plr
-PG_CPPFLAGS = -I$(r_includespec)
+SGMLDOCS	:= doc/plr.sgml
+BUILDDOCS	:= jade -c ${DOCBOOKSTYLE}/catalog -d $(top_builddir)/doc/src/sgml/stylesheet.dsl -i output-html -t sgml
+MODULE_big	:= plr
+PG_CPPFLAGS	:= -I$(r_includespec)
 SRCS		+= plr.c pg_conversion.c pg_backend_support.c pg_userfuncs.c pg_rsupport.c
 OBJS		:= $(SRCS:.c=.o)
-SHLIB_LINK = -L$(r_libdir) -lR
+SHLIB_LINK	:= -L$(r_libdir) -lR
 
-DATA_built = plr.sql 
-DOCS = README.plr
-REGRESS = plr
+DATA_built	:= plr.sql 
+DOCS		:= README.plr
+REGRESS		:= plr
+EXTRA_CLEAN	:= *.html HTML.index doc/*.html doc/HTML.index
 
 include $(top_srcdir)/contrib/contrib-global.mk

@@ -9,7 +9,7 @@
  </bookinfo>
 
  <chapter id="plr-intro">
-  <title>PL/R Introduction</title>
+  <title>Introduction</title>
 
   <para>
    PL/R is a loadable procedural language that enables you to write
@@ -61,7 +61,7 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
  </chapter>
 
  <chapter id="plr-overview">
-   <title>PL/R Overview</title>
+   <title>Overview</title>
 
    <para>
     PL/R offers most (if not all) of the capabilities a function
@@ -99,7 +99,7 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
  </chapter>
 
  <chapter id="plr-funcs">
-   <title>PL/R Functions and Arguments</title>
+   <title>Functions and Arguments</title>
 
    <para>
     To create a function in the <application>PL/R</> language, use standard R
@@ -230,7 +230,7 @@ regression=# select * from get_emps();
  </chapter>
 
  <chapter id="plr-data">
-   <title>Data Values in PL/R</title>
+   <title>Passing Data Values</title>
 
    <para>
     The argument values supplied to a PL/R function's script are simply
@@ -352,7 +352,7 @@ regression=# select * from get_emps();
  </chapter>
 
  <chapter id="plr-global-data">
-   <title>Global Data in PL/R</title>
+   <title>Using Global Data</title>
 
    <para>
     Sometimes it is useful to have some global status data that is held
@@ -366,7 +366,7 @@ regression=# select * from get_emps();
 
    <para>
     An example of using a global object appears in the
-    <function>pg.spi.execp</function> example below. A globally available
+    <function>pg.spi.execp</function> example. A globally available
     R function can be created dynamically using the provided PostgreSQL
     function <function>install_rcmd(text)</function>. Here is an example:
     <programlisting>
@@ -386,58 +386,41 @@ select pg_test_install('hello world');
    </para>
  </chapter>
 
-
-
-
-
-
-
-
- <chapter id="plr-oldtclstuff">
-  <title>Old Tcl stuff</title>
-
-   <sect1>
-    <title>Database Access from PL/Tcl</title>
+ <chapter id="plr-rsupport-funcs">
+   <title>Database Access</title>
 
     <para>
      The following commands are available to access the database from
-     the body of a PL/Tcl procedure:
+     the body of a PL/R procedure:
     </para>
 
     <variablelist>
 
      <varlistentry>
-      <term><function>spi_exec</function> <literal>?-count <replaceable>n</replaceable>? ?-array <replaceable>name</replaceable>? <replaceable>query</replaceable> ?<replaceable>loop-body</replaceable>?</literal></term>
+      <term><function>pg.spi.exec</function>(<replaceable>query</replaceable>)</term>
       <listitem>
        <para>
-	Execute an SQL query given as a string.  An error in the query
-	causes an error to be raised.  Otherwise, the command's return value
-	is the number of rows processed (selected, inserted, updated, or
-	deleted) by the query, or zero if the query is a utility
-	statement.  In addition, if the query is a SELECT statement, the
-	values of the selected columns are placed in Tcl variables as
-	described below.
+        Execute an SQL query given as a string.  An error in the query
+        causes an error to be raised.  Otherwise, the command's return value
+        is the number of rows processed for <command>INSERT</command>, 
+        <command>UPDATE</command>, or <command>DELETE</command> statements,
+        or zero if the query is a utility statement.  If the query is a
+        <command>SELECT</command> statement, the values of the selected columns
+        are placed in an R data.frame with the target column names used as
+        the frame column names.
        </para>
+
        <para>
-	The optional <literal>-count</> value tells
-	<function>spi_exec</function> the maximum number of rows
-	to process in the query.  The effect of this is comparable to
-	setting up the query as a cursor and then saying <literal>FETCH n</>.
-       </para>
-       <para>
-	If the query is a <literal>SELECT</> statement, the values of the statement's
-	result columns are placed into Tcl variables named after the columns.
-        If the <literal>-array</> option is given, the column values are
-	instead stored into the named associative array, with the SELECT
-	column names used as array indexes.
-       </para>
-       <para>
-        If the query is a SELECT statement and no <replaceable>loop-body</>
-	script is given, then only the first row of results are stored into
-	Tcl variables; remaining rows, if any, are ignored.  No store occurs
-	if the 
-	SELECT returns no rows (this case can be detected by checking the
-	result of <function>spi_exec</function>).  For example,
+        If a SELECT returns no rows, 
+.  For example,
+
+
+
+
+
+
+
+
 
 	<programlisting>
 spi_exec "SELECT count(*) AS cnt FROM pg_proc"
@@ -635,7 +618,16 @@ SELECT 'doesn''t' AS ret
 
     </variablelist>
 
-   </sect1>
+
+
+
+ </chapter>
+
+
+
+
+ <chapter id="plr-oldtclstuff">
+  <title>Old Tcl stuff</title>
 
    <sect1>
     <title>Trigger Procedures in PL/Tcl</title>

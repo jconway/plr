@@ -37,11 +37,11 @@ select pg_test_install('hello world');
 --
 -- a variety of plr functions
 --
-create or replace function throw_error(text) returns text as 'pg.throwerror(arg1)' language 'plr';
-select throw_error('hello');
+create or replace function throw_notice(text) returns text as 'pg.thrownotice(arg1)' language 'plr';
+select throw_notice('hello');
 NOTICE:  hello
- throw_error 
--------------
+ throw_notice 
+--------------
  hello
 (1 row)
 
