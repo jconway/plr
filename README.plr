@@ -37,12 +37,15 @@ Version 0.2 (15 February, 2003):
       docs. Too many to mention, but faithfully recorded in cvs commit
       messages.
 
+Version 0.5 (5 August, 2003):
+    - See http://www.joeconway.com/plr/ for release notes
+
 Installation:
   Place these files in a directory called 'plr' under 'contrib' in the
   PostgreSQL source tree. E.g. place the tarred source file in 
   '/path/to/pg_source/contrib' and run:
 
-    tar -xzf plr.x.y.z.tar.gz
+    tar -xzf plr-x.y.z-alpha.tar.gz
 
   Then run:
 

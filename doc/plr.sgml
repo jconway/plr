@@ -13,9 +13,10 @@
 
    <para>
     PL/R is a loadable procedural language that enables you to write
-    PostgreSQL functions in the <ulink url="http://www.r-project.org/">R
-    programming language</ulink>. PL/R offers most (if not all) of the
-    capabilities a function writer has in the R language.
+    PostgreSQL functions and triggers in the
+    <ulink url="http://www.r-project.org/">R programming language</ulink>.
+    PL/R offers most (if not all) of the capabilities a function writer has
+    in the R language.
    </para>
 
    <para>
@@ -144,10 +145,10 @@ CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS '
        return(arg1)
     else
        return(arg2)
-' LANGUAGE 'plr' WITH (isStrict);
+' LANGUAGE 'plr' STRICT;
     </programlisting>
 
-    Note the clause <literal>WITH (isStrict)</>, which saves us from
+    Note the clause <literal>STRICT</>, which saves us from
     having to think about NULL input values: if a NULL is passed, the
     function will not be called at all, but will just return a NULL
     result automatically.
@@ -156,17 +157,17 @@ CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS '
    <para>
     In a non-strict function, if the actual value of an argument
     is NULL, the corresponding <literal>argN</literal> variable will be set
-    to an <literal>NA</literal> string. For example, suppose that we wanted
+    to a <literal>NULL</literal> R object. For example, suppose that we wanted
     <function>r_max</function> with one null and one non-null argument to
     return the non-null argument, rather than NULL:
 
     <programlisting>
 CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS '
-    if (is.na(arg1) && is.na(arg2))
-        return(NA)
-    if (is.na(arg1))
+    if (is.null(arg1) && is.null(arg2))
+        return(NULL)
+    if (is.null(arg1))
         return(arg2)
-    if (is.na(arg2))
+    if (is.null(arg2))
         return(arg1)
     if (arg1 > arg2)
        return(arg1)
@@ -177,7 +178,7 @@ CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS '
 
    <para>
     As shown above, to return a NULL value from a PL/R function, return
-    <literal>NA</literal>.  This can be done whether the function is strict
+    <literal>NULL</literal>.  This can be done whether the function is strict
     or not.
    </para>
 
@@ -258,16 +259,6 @@ select round(sd('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
      <command>CREATE FUNCTION</command>, you have to escape single
      quotes and backslashes within your R source, typically by
      doubling them.
-    </para>
-   </tip>
-
-   <tip>
-    <para>
-     In PostgreSQL 7.3.x, declaring an array function
-     <emphasis>argument</emphasis> using the brackets syntax
-     (<type>datatype</type>[]) does not work correctly. Use the underscore
-     syntax instead (_<type>datatype</type>). In the next PostgreSQL release,
-     this should be fixed, and either syntax will work.
     </para>
    </tip>
 
@@ -640,7 +631,7 @@ select test_spi_prep('select oid, typname from pg_type
  OK
 (1 row)
 
-create or replace function test_spi_execp(text) returns record as '
+create or replace function test_spi_execp(text) returns setof record as '
   pg.spi.execp(pg.reval(arg1), NA)
 ' language 'plr';
 
@@ -663,7 +654,7 @@ select test_spi_prep('select oid, typname from pg_type
  OK
 (1 row)
 
-create or replace function test_spi_execp(text) returns record as '
+create or replace function test_spi_execp(text) returns setof record as '
   pg.spi.execp(pg.reval(arg1))
 ' language 'plr';
 
@@ -1052,8 +1043,172 @@ select pg_test_module_load('hello world');
 
  <chapter id="plr-trigger-func">
    <title>Trigger Procedures</title>
+
+    <indexterm>
+     <primary>triggers</primary>
+     <secondary>in PL/R</secondary>
+    </indexterm>
+
     <para>
-     Currently trigger procedures are not supported by PL/R.
+     Trigger procedures can be written in PL/R.
+     <productname>PostgreSQL</productname> requires that a procedure that is to be called
+     as a trigger must be declared as a function with no arguments
+     and a return type of <literal>trigger</>.
+    </para>
+    <para>
+     The information from the trigger manager is passed to the procedure body
+     in the following variables:
+
+     <variablelist>
+
+      <varlistentry>
+       <term><varname>pg.tg.name</varname></term>
+       <listitem>
+	<para>
+	 The name of the trigger from the <command>CREATE TRIGGER</command> statement.
+	</para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><varname>pg.tg.relid</varname></term>
+       <listitem>
+	<para>
+	 The object ID of the table that caused the trigger procedure
+	 to be invoked.
+	</para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><varname>pg.tg.relname</varname></term>
+       <listitem>
+	<para>
+	 The name of the table that caused the trigger procedure
+	 to be invoked.
+	</para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><varname>pg.tg.when</varname></term>
+       <listitem>
+	<para>
+	 The string <literal>BEFORE</> or <literal>AFTER</> depending on the
+	 type of trigger call.
+	</para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><varname>pg.tg.level</varname></term>
+       <listitem>
+	<para>
+	 The string <literal>ROW</> or <literal>STATEMENT</> depending on the
+	 type of trigger call.
+	</para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><varname>pg.tg.op</varname></term>
+       <listitem>
+	<para>
+	 The string <literal>INSERT</>, <literal>UPDATE</>, or
+	 <literal>DELETE</> depending on the type of trigger call.
+	</para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><varname>pg.tg.new</varname></term>
+       <listitem>
+	<para>
+     When the trigger is defined <command>FOR EACH ROW</>, 
+	 a data.frame containing the values of the new table
+	 row for <command>INSERT</> or <command>UPDATE</> actions. For
+     triggers defined <command>FOR EACH STATEMENT</> and for
+     <command>DELETE</> actions, set to <literal>NULL</>.  The
+     atribute names are the table's column names.  Columns that are
+     null will be represented as NA.
+	</para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><varname>pg.tg.new</varname></term>
+       <listitem>
+	<para>
+     When the trigger is defined <command>FOR EACH ROW</>, 
+	 a data.frame containing the values of the old table
+	 row for <command>DELETE</> or <command>UPDATE</> actions. For
+     triggers defined <command>FOR EACH STATEMENT</> and for
+     <command>INSERT</> actions, set to <literal>NULL</>.  The
+     atribute names are the table's column names.  Columns that are
+     null will be represented as NA.
+	</para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><varname>pg.tg.args</varname></term>
+       <listitem>
+	<para>
+	 A vector of the arguments to the procedure as given in the
+	 <command>CREATE TRIGGER</command> statement.
+	</para>
+       </listitem>
+      </varlistentry>
+
+     </variablelist>
+    </para>
+
+    <para>
+     The return value from a trigger procedure can be <literal>NULL</> or a
+     one row data.frame matching the number and type of columns in the trigger
+     table. <literal>NULL</> tells the trigger manager to silently
+     suppress the operation for this row. If a one row data.frame is returned,
+     it tells PL/R to return a possibly modified row to the trigger manager
+     that will be inserted instead of the one given in <varname>pg.tg.new</>.
+     This works for <command>INSERT</> and <command>UPDATE</> only. Needless
+     to say that all this is only meaningful when the trigger is
+     <literal>BEFORE</> and <command>FOR EACH ROW</>; otherwise the return
+     value is ignored.
+    </para>
+    <para>
+     Here's a little example trigger procedure that forces an integer value
+     in a table to keep track of the number of updates that are performed on the
+     row. For new rows inserted, the value is initialized to 0 and then
+     incremented on every update operation.
+
+<programlisting>
+CREATE FUNCTION trigfunc_modcount() RETURNS trigger AS '
+
+    if (pg.tg.op == "INSERT")
+    {
+      retval <- pg.tg.new
+      retval[pg.tg.args[1]] <- 0
+    }
+    if (pg.tg.op == "UPDATE")
+    {
+      retval <- pg.tg.new
+      retval[pg.tg.args[1]] <- pg.tg.old[pg.tg.args[1]] + 1
+    }
+    if (pg.tg.op == "DELETE")
+      retval <- pg.tg.old
+
+    return(retval)
+' LANGUAGE plr;
+
+CREATE TABLE mytab (num integer, description text, modcnt integer);
+
+CREATE TRIGGER trig_mytab_modcount BEFORE INSERT OR UPDATE ON mytab
+    FOR EACH ROW EXECUTE PROCEDURE trigfunc_modcount('modcnt');
+</programlisting>
+
+     Notice that the trigger procedure itself does not know the column
+     name; that's supplied from the trigger arguments.  This lets the
+     trigger procedure be reused with different tables.
     </para>
  </chapter>
 

@@ -81,19 +81,11 @@ pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func)
 							 			  (Datum) 0,
 										  Int32GetDatum(-1)));
 
-	if (value != NULL)
-	{
-		/* get new vector of the appropriate type, length 1 */
-		PROTECT(result = get_r_vector(arg_typid, 1));
+	/* get new vector of the appropriate type, length 1 */
+	PROTECT(result = get_r_vector(arg_typid, 1));
 
-		/* add our value to it */
-		pg_get_one_r(value, arg_typid, &result, 0);
-	}
-	else
-	{
-		PROTECT(result = NEW_CHARACTER(1));
-		SET_STRING_ELT(result, 0, NA_STRING);
-	}
+	/* add our value to it */
+	pg_get_one_r(value, arg_typid, &result, 0);
 
 	UNPROTECT(1);
 
@@ -102,7 +94,7 @@ pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func)
 
 
 /*
- * given an array pg value, convert to a multi-row R vector
+ * Given an array pg value, convert to a multi-row R vector.
  */
 SEXP
 pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char typalign)
@@ -123,6 +115,10 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 				ndim,
 			   *dim;
 	char	   *p;
+
+	/* short-circuit for NULL datums */
+	if (dvalue == (Datum) NULL)
+		return R_NilValue;
 
 	ndim = ARR_NDIM(v);
 	element_type = ARR_ELEMTYPE(v);
@@ -178,10 +174,14 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 				p = att_addlength(p, typlen, PointerGetDatum(p));
 				p = (char *) att_align(p, typalign);
 
-				if (value != NULL)
-					pg_get_one_r(value, element_type, &result, idx);
-				else
-					SET_STRING_ELT(result, idx, NA_STRING);
+				/*
+				 * Note that pg_get_one_r() replaces NULL values with
+				 * the NA value appropriate for the data type. Not presently
+				 * a concern anyway, but when Postgres arrays start allowing
+				 * NULL elements, nothing needs to change here. That's a
+				 * Good Thing.
+				 */
+				pg_get_one_r(value, element_type, &result, idx);
 			}
 		}
 	}
@@ -222,7 +222,7 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 	SEXP		fldvec;
 
 	if (tuples == NULL || ntuples < 1)
-		return(R_NilValue);
+		return R_NilValue;
 
 	/*
 	 * Allocate the data.frame initially as a list,
@@ -278,10 +278,7 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 				char	   *value;
 
 				value = SPI_getvalue(tuples[i], tupdesc, j + 1);
-				if (value != NULL)
-					pg_get_one_r(value, element_type, &fldvec, i);
-				else
-					SET_STRING_ELT(fldvec, i, NA_STRING);
+				pg_get_one_r(value, element_type, &fldvec, i);
 			}
 			else
 			{
@@ -291,13 +288,7 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 				SEXP		fldvec_elem;
 
 				dvalue = SPI_getbinval(tuples[i], tupdesc, j + 1, &isnull);
-				if (!isnull)
-					PROTECT(fldvec_elem = pg_array_get_r(dvalue, outputproc, typlen, typbyval, typalign));
-				else
-				{
-					PROTECT(fldvec_elem = NEW_CHARACTER(1));
-					SET_STRING_ELT(fldvec_elem, 0, NA_STRING);
-				}
+				PROTECT(fldvec_elem = pg_array_get_r(dvalue, outputproc, typlen, typbyval, typalign));
 
 				SET_VECTOR_ELT(fldvec, i, fldvec_elem);
 				UNPROTECT(1);
@@ -379,7 +370,10 @@ pg_get_one_r(char *value, Oid typtype, SEXP *obj, int elnum)
 		case INT2OID:
 		case INT4OID:
 			/* 2 and 4 byte integer pgsql datatype => use R INTEGER */
-			INTEGER_DATA(*obj)[elnum] = atoi(value);
+			if (value)
+				INTEGER_DATA(*obj)[elnum] = atoi(value);
+			else
+				INTEGER_DATA(*obj)[elnum] = NA_INTEGER;
 		    break;
 		case INT8OID:
 		case FLOAT4OID:
@@ -391,14 +385,23 @@ pg_get_one_r(char *value, Oid typtype, SEXP *obj, int elnum)
 			 * Note pgsql int8 is mapped to R REAL
 			 * because R INTEGER is only 4 byte
 			 */
-			NUMERIC_DATA(*obj)[elnum] = atof(value);
+			if (value)
+				NUMERIC_DATA(*obj)[elnum] = atof(value);
+			else
+				NUMERIC_DATA(*obj)[elnum] = NA_REAL;
 		    break;
 		case BOOLOID:
-			LOGICAL_DATA(*obj)[elnum] = ((*value == 't') ? 1 : 0);
+			if (value)
+				LOGICAL_DATA(*obj)[elnum] = ((*value == 't') ? 1 : 0);
+			else
+				LOGICAL_DATA(*obj)[elnum] = NA_LOGICAL;
 		    break;
 		default:
 			/* Everything else is defaulted to string */
-			SET_STRING_ELT(*obj, elnum, COPY_TO_USER_STRING(value));
+			if (value)
+				SET_STRING_ELT(*obj, elnum, COPY_TO_USER_STRING(value));
+			else
+				SET_STRING_ELT(*obj, elnum, NA_STRING);
 	}
 }
 
@@ -1031,7 +1034,6 @@ get_frame_tuplestore(SEXP rval,
 			SET_VECTOR_ELT(result, j, dfcol);
 		}
 
-
 		UNPROTECT(1);
 	}
 
@@ -1063,7 +1065,7 @@ get_frame_tuplestore(SEXP rval,
 			}
 			else
 			{
-				if (STRING_ELT(dfcol, 0) != NA_STRING)
+				if (STRING_ELT(dfcol, i) != NA_STRING)
 					values[j] = pstrdup(CHAR(STRING_ELT(dfcol, i)));
 				else
 					values[j] = NULL;
@@ -1135,7 +1137,12 @@ get_matrix_tuplestore(SEXP rval,
 	for(i = 0; i < nr; i++)
 	{
 		for (j = 0; j < nc; j++)
-			values[j] = CHAR(STRING_ELT(obj, (j * nr) + i));
+		{
+			if (STRING_ELT(obj, (j * nr) + i) != NA_STRING)
+				values[j] = CHAR(STRING_ELT(obj, (j * nr) + i));
+			else
+				values[j] = NULL;
+		}
 
 		/* construct the tuple */
 		tuple = BuildTupleFromCStrings(attinmeta, values);
@@ -1197,7 +1204,10 @@ get_generic_tuplestore(SEXP rval,
 
 	for(i = 0; i < nr; i++)
 	{
-		values[0] = CHAR(STRING_ELT(obj, i));
+		if (STRING_ELT(obj, i) != NA_STRING)
+			values[0] = CHAR(STRING_ELT(obj, i));
+		else
+			values[0] = NULL;
 
 		/* construct the tuple */
 		tuple = BuildTupleFromCStrings(attinmeta, values);
