@@ -190,7 +190,7 @@ CREATE OR REPLACE FUNCTION overpaid (emp) RETURNS bool AS '
     }
     return(FALSE)
 ' LANGUAGE 'plr';
-regression=# SELECT name, overpaid(emp) FROM emp;
+SELECT name, overpaid(emp) FROM emp;
  name | overpaid
 ------+----------
  Joe  | t
@@ -212,7 +212,7 @@ CREATE OR REPLACE FUNCTION get_emps() RETURNS SETOF emp AS '
     df <- data.frame(name = names, age = ages, salary = salaries)
     return(df)
 ' LANGUAGE 'plr';
-regression=# select * from get_emps();
+select * from get_emps();
  name | age |  salary
 ------+-----+-----------
  Jim  |  41 | 250000.00
@@ -220,6 +220,23 @@ regression=# select * from get_emps();
  Jon  |  35 |  50000.00
 (3 rows)
 
+    </programlisting>
+   </para>
+
+   <para>
+    An alternative method may be used to create a function in PL/R, if
+    certain criteria are met. First, the function must be a simple call
+    to an existing R function. Second, the function name used for the PL/R
+    function must match that of the R function exactly. If these two criteria
+    are met, the PL/R function may be defined with no body, and the arguments
+    will be passed directly to the R function of the same name. For example:
+    <programlisting>
+create or replace function sd(_float8) returns float as '' language 'plr';
+select round(sd('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
+   round    
+------------
+ 0.08180261
+(1 row)
     </programlisting>
    </para>
 
@@ -231,13 +248,24 @@ regression=# select * from get_emps();
      doubling them.
     </para>
    </tip>
+
+   <tip>
+    <para>
+     In PostgreSQL 7.3.x, declaring an array function
+     <emphasis>argument</emphasis> using the brackets syntax
+     (<type>datatype</type>[]) does not work correctly. Use the underscore
+     syntax instead (_<type>datatype</type>). In the next PostgreSQL release,
+     this should be fixed, and either syntax will work.
+    </para>
+   </tip>
+
  </chapter>
 
  <chapter id="plr-data">
    <title>Passing Data Values</title>
 
    <para>
-    The argument values supplied to a PL/R function's script are simply
+    The argument values supplied to a PL/R function's script are
     the input arguments converted to a corresponding R form.
     See <xref linkend="plr-args-table">. Scalar PostgreSQL
     values become single element R vectors. One-dimensional
@@ -316,10 +344,24 @@ regression=# select * from get_emps();
       </row>
 
       <row>
+       <entry><type>setof scalar</type></entry>
+       <entry><type>1D array</type>, <type>greater than 2D array</type>, <type>vector</type></entry>
+       <entry>multi-row, 1 column set</entry>
+       <entry>array(1:10) in R returns 10 rows in PostgreSQL</entry>
+      </row>
+
+      <row>
        <entry><type>scalar</type></entry>
        <entry><type>data.frame</type></entry>
        <entry>textual representation of the first column's vector</entry>
        <entry>data.frame(c(1,2,3)) in R returns 'c(1, 2, 3)'</entry>
+      </row>
+
+      <row>
+       <entry><type>setof scalar</type></entry>
+       <entry><type>2D array</type>, <type>matrix</type>, <type>data.frame</type></entry>
+       <entry>#columns > 1, error; #columns == 1, multi-row, 1 column set</entry>
+       <entry>(as.data.frame(array(1:10,c(2,5))))[,1] in R returns 2 rows of scalar</entry>
       </row>
 
       <row>
@@ -339,14 +381,28 @@ regression=# select * from get_emps();
       <row>
        <entry><type>composite</type></entry>
        <entry><type>1D array</type>, <type>greater than 2D array</type>, <type>vector</type></entry>
-       <entry>1 column set</entry>
+       <entry>first row, 1 column</entry>
+       <entry>array(1:8,c(2,2,2)) in R returns 1 row of scalar</entry>
+      </row>
+
+      <row>
+       <entry><type>setof composite</type></entry>
+       <entry><type>1D array</type>, <type>greater than 2D array</type>, <type>vector</type></entry>
+       <entry>multi-row, 1 column set</entry>
        <entry>array(1:8,c(2,2,2)) in R returns 8 rows of scalar</entry>
       </row>
 
       <row>
        <entry><type>composite</type></entry>
        <entry><type>2D array</type>, <type>matrix</type>, <type>data.frame</type></entry>
-       <entry>multi-column set</entry>
+       <entry>first row, multi-column</entry>
+       <entry>array(1:4,c(2,2)) in R returns 1 row of 2 columns</entry>
+      </row>
+
+      <row>
+       <entry><type>setof composite</type></entry>
+       <entry><type>2D array</type>, <type>matrix</type>, <type>data.frame</type></entry>
+       <entry>multi-row, multi-column set</entry>
        <entry>array(1:4,c(2,2)) in R returns 2 rows of 2 columns</entry>
       </row>
 
@@ -365,14 +421,18 @@ regression=# select * from get_emps();
     your PL/R functions can share. This is easily done since all PL/R
     procedures executed in one backend share the same R interpreter.  So,
     any global R variable is accessible to all PL/R procedure calls, and
-    will persist for the duration of the SQL client connection.
+    will persist for the duration of the SQL client connection. An example
+    of using a global object appears in the
+    <function>pg.spi.execp</function> example, in
+    <xref linkend="plr-spi-rsupport-funcs">.
    </para>
 
    <para>
-    An example of using a global object appears in the
-    <function>pg.spi.execp</function> example. A globally available
-    R function can be created dynamically using the provided PostgreSQL
-    function <function>install_rcmd(text)</function>. Here is an example:
+    A globally available, user named, R function (the R function name of PL/R
+    functions is not the same as its PostgreSQL function name; see: 
+    <xref linkend="plr-func-naming">) can be created dynamically
+    using the provided PostgreSQL function 
+    <function>install_rcmd(text)</function>. Here is an example:
     <programlisting>
 select install_rcmd('pg.test.install <-function(msg) {print(msg)}');
  install_rcmd 
@@ -391,6 +451,13 @@ select pg_test_install('hello world');
 (1 row)
     </programlisting>
    </para>
+
+   <para>
+    A globally available, user named, R function can also be automatically
+    created and installed in the R interpreter. See: 
+    <xref linkend="plr-module-funcs">
+   </para>
+
  </chapter>
 
  <chapter id="plr-spi-rsupport-funcs">
@@ -470,7 +537,7 @@ select * from test_spi_tup('select oid, NULL::text as nullcol,
         TYPENAME. A support function, <function>r_typenames()</function> can be
         used to list the predefined Global variables:
         <programlisting>
-regression=# select * from r_typenames();
+select * from r_typenames();
     typename     | typeoid
 -----------------+---------
  ABSTIMEOID      |     702
@@ -744,7 +811,7 @@ select array('hello','world');
         types. For example, to define an <function>array_push</function>
         function to add a text value to an existing text array:
      <programlisting>
-CREATE OR REPLACE FUNCTION array_push (text[], text)
+CREATE OR REPLACE FUNCTION array_push (_text, text)
 RETURNS text[]
 AS '$libdir/plr','array_push'
 LANGUAGE 'C' WITH (isstrict);
@@ -776,7 +843,7 @@ select array_push(array('hello','world'), 'how are you');
         to define an <function>array_accum</function> function to add an
         int4 value to an existing int4 array:
         <programlisting>
-CREATE OR REPLACE FUNCTION array_accum (int4[], int4)
+CREATE OR REPLACE FUNCTION array_accum (_int4, int4)
 RETURNS int4[]
 AS '$libdir/plr','array_accum'
 LANGUAGE 'C';
