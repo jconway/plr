@@ -88,9 +88,9 @@ select reval('a <- sd(c(1,2,3)); b <- mean(c(1,2,3)); a + b');
 
 create or replace function "commandArgs"() returns text[] as '' language 'plr';
 select "commandArgs"();
-             commandArgs              
---------------------------------------
- {PL/R,--gui=none,--silent,--no-save}
+        commandArgs        
+---------------------------
+ {PL/R,--silent,--no-save}
 (1 row)
 
 create or replace function vec(float) returns text as 'c(arg1)' language 'plr';

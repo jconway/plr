@@ -294,7 +294,7 @@ start_interp(void)
 {
 	char	   *r_home;
 	int			rargc;
-	char	   *rargv[] = {"PL/R", "--gui=none", "--silent", "--no-save"};
+	char	   *rargv[] = {"PL/R", "--silent", "--no-save"};
 
 	/* refuse to start more than once */
 	if (plr_interp_started == true)
