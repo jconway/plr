@@ -774,6 +774,8 @@ do_compile(FunctionCallInfo fcinfo,
 		   plr_func_hashkey *hashkey)
 {
 	Form_pg_proc			procStruct = (Form_pg_proc) GETSTRUCT(procTup);
+	Datum					prosrcdatum;
+	bool					isnull;
 	bool					is_trigger = CALLED_AS_TRIGGER(fcinfo) ? true : false;
 	plr_function		   *function = NULL;
 	Oid						fn_oid = fcinfo->flinfo->fn_oid;
@@ -1110,8 +1112,11 @@ do_compile(FunctionCallInfo fcinfo,
 					 proc_internal_args->data);
 
 	/* Add user's function definition to proc body */
-	proc_source = DatumGetCString(DirectFunctionCall1(textout,
-							  PointerGetDatum(&procStruct->prosrc)));
+	prosrcdatum = SysCacheGetAttr(PROCOID, procTup,
+								  Anum_pg_proc_prosrc, &isnull);
+	if (isnull)
+		elog(ERROR, "null prosrc");
+	proc_source = DatumGetCString(DirectFunctionCall1(textout, prosrcdatum));
 
 	appendStringInfo(proc_internal_def, "%s}", proc_source);
 
