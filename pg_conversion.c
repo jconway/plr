@@ -145,7 +145,9 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 		nz = dim[2];
 	}
 	else
-		elog(ERROR, "plr: 4 (or more) dimension arrays are not yet supported as function arguments");
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("greater than 3-dimensional arrays are not yet supported")));
 
 	/* get new vector of the appropriate type and length */
 	PROTECT(result = get_r_vector(element_type, nitems));
@@ -437,8 +439,10 @@ get_tuplestore(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bool 
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (!rsinfo || !(rsinfo->allowedModes & SFRM_Materialize))
-		elog(ERROR, "plr: Materialize mode required, but it is not "
-			 "allowed in this context");
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("materialize mode required, but it is not "
+						"allowed in this context")));
 
 	if (isFrame(rval))
 		nc = length(rval);
@@ -462,8 +466,10 @@ get_tuplestore(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bool 
 	 * function to complain if needed.
 	 */
 	if (nc != tupdesc->natts)
-		elog(ERROR, "plr: Query-specified return tuple and " \
-					"function returned data.frame are not compatible");
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("query-specified return tuple and "
+						"function returned data.frame are not compatible")));
 
 	attinmeta = TupleDescGetAttInMetadata(tupdesc);
 
@@ -604,6 +610,7 @@ get_frame_array_datum(SEXP rval, plr_function *function, bool *isnull)
 			rval = CDR(rval);
 		}
 		else
+			/* internal error */
 			elog(ERROR, "plr: bad internal representation of data.frame");
 
 		if (ATTRIB(dfcol) == R_NilValue)
@@ -623,7 +630,9 @@ get_frame_array_datum(SEXP rval, plr_function *function, bool *isnull)
 			idx = ((i * nc) + j);
 
 			if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
-				elog(ERROR, "plr: cannot return array with NULL elements");
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("cannot return array with NULL elements")));
 			else
 				dvalues[idx] = FunctionCall3(&in_func,
 										CStringGetDatum(value),
@@ -689,8 +698,10 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, bool *isnull)
 			    break;
 			default:
 				/* anything higher is currently unsupported */
-				elog(ERROR, "plr: returning arrays of greater than 3 " \
-							"dimensions is currently not supported");
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("greater than 3-dimensional arrays are " \
+								"not yet supported")));
 		}
 
 	}
@@ -710,7 +721,9 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, bool *isnull)
 				value = CHAR(STRING_ELT(obj, idx));
 
 				if (STRING_ELT(obj, idx) == NA_STRING || value == NULL)
-					elog(ERROR, "plr: cannot return array with NULL elements");
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("cannot return array with NULL elements")));
 				else
 					dvalues[cntr++] = FunctionCall3(&in_func,
 											CStringGetDatum(value),
@@ -757,7 +770,9 @@ get_generic_array_datum(SEXP rval, plr_function *function, bool *isnull)
 		value = CHAR(STRING_ELT(obj, i));
 
 		if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
-			elog(ERROR, "plr: cannot return array with NULL elements");
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("cannot return array with NULL elements")));
 		else
 			dvalues[i] = FunctionCall3(&in_func,
 									CStringGetDatum(value),

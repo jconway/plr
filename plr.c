@@ -39,8 +39,8 @@ MemoryContext plr_SPI_context;
 HTAB *plr_HashTable = (HTAB *) NULL;
 char *last_R_error_msg = NULL;
 
-static bool plr_firstcall = true;
-static bool	plr_interp_started = false;
+static bool	plr_pm_init_done = false;
+static bool	plr_be_init_done = false;
 static FunctionCallInfo plr_current_fcinfo = NULL;
 
 /*
@@ -104,7 +104,7 @@ static FunctionCallInfo plr_current_fcinfo = NULL;
 /*
  * static declarations
  */
-static void plr_init_interp(Oid funcid);
+static void plr_load_builtins(Oid funcid);
 static void plr_init_all(Oid funcid);
 static HeapTuple plr_trigger_handler(PG_FUNCTION_ARGS);
 static Datum plr_func_handler(PG_FUNCTION_ARGS);
@@ -138,14 +138,15 @@ plr_call_handler(PG_FUNCTION_ARGS)
 
 	/* Connect to SPI manager */
 	if (SPI_connect() != SPI_OK_CONNECT)
-		elog(ERROR, "plr: cannot connect to SPI manager");
+		ereport(ERROR,
+				(errcode(ERRCODE_CONNECTION_FAILURE),
+				 errmsg("cannot connect to SPI manager")));
 
 	/* switch from SPI back to original call memory context */
 	plr_SPI_context = MemoryContextSwitchTo(origcontext);
 
 	/* initialize R if needed */
-	if(plr_firstcall)
-		plr_init_all(fcinfo->flinfo->fn_oid);
+	plr_init_all(fcinfo->flinfo->fn_oid);
 
 	if (CALLED_AS_TRIGGER(fcinfo))
 	{
@@ -162,7 +163,9 @@ plr_call_handler(PG_FUNCTION_ARGS)
 	MemoryContextSwitchTo(plr_SPI_context);
 
 	if (SPI_finish() != SPI_OK_FINISH)
-		elog(ERROR, "plr: SPI_finish() failed");
+		ereport(ERROR,
+				(errcode(ERRCODE_CONNECTION_EXCEPTION),
+				 errmsg("SPI_finish() failed")));
 
 	/* restore caller's SPI context */
 	plr_SPI_context = plr_SPI_context_save;
@@ -179,9 +182,13 @@ load_r_cmd(const char *cmd)
 	int			i,
 				status;
 
-	/* start EmbeddedR if not already done */
-	if (plr_interp_started == false)
-		start_interp();
+	/*
+	 * Init if not already done. This can happen when PL/R is not preloaded
+	 * and reload_plr_modules() or install_rcmd() is called by the user prior
+	 * to any PL/R functions.
+	 */
+	if (!plr_pm_init_done)
+		plr_init();
 
 	PROTECT(cmdSexp = NEW_CHARACTER(1));
 	SET_STRING_ELT(cmdSexp, 0, COPY_TO_USER_STRING(cmd));
@@ -189,9 +196,15 @@ load_r_cmd(const char *cmd)
 	if (status != PARSE_OK) {
 	    UNPROTECT(2);
 		if (last_R_error_msg)
-			elog(ERROR, "%s", last_R_error_msg);
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("R interpreter parse error"),
+					 errdetail("%s", last_R_error_msg)));
 		else
-			elog(ERROR, "R parse error: %s", cmd);
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("R interpreter parse error"),
+					 errdetail("R parse error caught in \"%s\".", cmd)));
 	}
 
 	/* Loop is needed here as EXPSEXP may be of length > 1 */
@@ -201,9 +214,16 @@ load_r_cmd(const char *cmd)
 		if(status != 0)
 		{
 			if (last_R_error_msg)
-				elog(ERROR, "%s", last_R_error_msg);
+				ereport(ERROR,
+						(errcode(ERRCODE_DATA_EXCEPTION),
+						 errmsg("R interpreter expression evaluation error"),
+						 errdetail("%s", last_R_error_msg)));
 			else
-				elog(ERROR, "%s", "caught error calling R function");
+				ereport(ERROR,
+						(errcode(ERRCODE_DATA_EXCEPTION),
+						 errmsg("R interpreter expression evaluation error"),
+						 errdetail("R expression evaluation error caught " \
+								   "in \"%s\".", cmd)));
 		}
 	}
 
@@ -211,35 +231,40 @@ load_r_cmd(const char *cmd)
 }
 
 /*
- * start_interp() - start embedded R
+ * plr_init() - Initialize all that's safe to do in the postmaster
+ *
+ * DO NOT make this static --- it has to be callable by preload
  */
 void
-start_interp(void)
+plr_init(void)
 {
 	char	   *r_home;
 	int			rargc;
 	char	   *rargv[] = {"PL/R", "--silent", "--no-save"};
 
-	/* refuse to start more than once */
-	if (plr_interp_started == true)
+	/* refuse to init more than once */
+	if (plr_pm_init_done)
 		return;
 
 	/* refuse to start if R_HOME is not defined */
 	r_home = getenv("R_HOME");
 	if (r_home == NULL)
-		elog(ERROR, "plr: cannot start interpreter unless R_HOME " \
-					"environment variable is defined");
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("environment variable R_HOME not defined"),
+				 errhint("R_HOME must be defined in the environment " \
+						 "of the user that starts the postmaster process.")));
 
 	rargc = sizeof(rargv)/sizeof(rargv[0]);
 	Rf_initEmbeddedR(rargc, rargv);
-	plr_interp_started = true;
+	plr_pm_init_done = true;
 }
 
 /*
- * plr_init_interp() - initialize an R interpreter
+ * plr_load_builtins() - load "builtin" PL/R functions into R interpreter
  */
 static void
-plr_init_interp(Oid funcid)
+plr_load_builtins(Oid funcid)
 {
 	int			j;
 	char	   *cmd;
@@ -270,10 +295,6 @@ plr_init_interp(Oid funcid)
 		NULL
 	};
 
-	/* start EmbeddedR if not already done */
-	if (plr_interp_started == false)
-		start_interp();
-
 	/*
 	 * temporarily turn off R error reporting -- it will be turned back on
 	 * once the custom R error handler is installed from the plr library
@@ -289,31 +310,23 @@ plr_init_interp(Oid funcid)
 	 */
 	for (j = 1; (cmd = cmds[j]); j++)
 		load_r_cmd(cmds[j]);
-
-	/*
-	 * Try to load procedures from plr_modules
-	 */
-	plr_init_load_modules(plr_SPI_context);
 }
 
 /*
- * plr_init_load_modules() - Load procedures from
- *				  table plr_modules (if it exists)
+ * plr_load_modules() - Load procedures from
+ *				  		table plr_modules (if it exists)
  *
  * The caller is responsible to ensure SPI has already been connected
+ * DO NOT make this static --- it has to be callable by reload_plr_modules()
  */
 void
-plr_init_load_modules(MemoryContext	plr_SPI_context)
+plr_load_modules(MemoryContext	plr_SPI_context)
 {
 	int				spi_rc;
 	char		   *cmd;
 	int				i;
 	int				fno;
 	MemoryContext	oldcontext;
-
-	/* start EmbeddedR if not already done */
-	if (plr_interp_started == false)
-		start_interp();
 
 	/* switch to SPI memory context */
 	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
@@ -326,6 +339,7 @@ plr_init_load_modules(MemoryContext	plr_SPI_context)
 	SPI_freetuptable(SPI_tuptable);
 
 	if (spi_rc != SPI_OK_SELECT)
+		/* internal error */
 		elog(ERROR, "plr_init_load_modules: select from pg_class failed");
 	if (SPI_processed == 0)
 		return;
@@ -334,6 +348,7 @@ plr_init_load_modules(MemoryContext	plr_SPI_context)
 	spi_rc = SPI_exec("select modseq, modsrc from plr_modules " \
 					  "order by modseq", 0);
 	if (spi_rc != SPI_OK_SELECT)
+		/* internal error */
 		elog(ERROR, "plr_init_load_modules: select from plr_modules failed");
 
 	/* If there's nothing, no modules exist */
@@ -374,10 +389,24 @@ plr_init_all(Oid funcid)
 	/* everything initialized needs to live until/unless we explicitly delete it */
 	oldcontext = MemoryContextSwitchTo(TopMemoryContext);
 
-	/* initialize EmbeddedR */
-	plr_init_interp(funcid);
+	/* execute postmaster-startup safe initialization */
+	if (!plr_pm_init_done)
+		plr_init();
 
-	plr_firstcall = false;
+	/*
+	 * Any other initialization that must be done each time a new
+	 * backend starts:
+	 */
+	if (!plr_be_init_done)
+	{
+		/* load "builtin" R functions */
+		plr_load_builtins(funcid);
+
+		/* try to load procedures from plr_modules */
+		plr_load_modules(plr_SPI_context);
+
+		plr_be_init_done = true;
+	}
 
 	/* switch back to caller's context */
 	MemoryContextSwitchTo(oldcontext);
@@ -387,7 +416,10 @@ static HeapTuple
 plr_trigger_handler(PG_FUNCTION_ARGS)
 {
 	/* FIXME */
-	elog(ERROR, "plr does not support triggers yet");
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("feature not supported")));
+
 	return (HeapTuple) 0;
 }
 
@@ -453,7 +485,9 @@ compile_plr_function(FunctionCallInfo fcinfo)
 							 ObjectIdGetDatum(funcOid),
 							 0, 0, 0);
 	if (!HeapTupleIsValid(procTup))
-		elog(ERROR, "plpgsql: cache lookup for proc %u failed", funcOid);
+		/* internal error */
+		elog(ERROR, "cache lookup failed for proc %u", funcOid);
+
 	procStruct = (Form_pg_proc) GETSTRUCT(procTup);
 
 	/* set up error context */
@@ -585,7 +619,10 @@ do_compile(FunctionCallInfo fcinfo,
 	/* Allocate a new procedure description block */
 	function = (plr_function *) palloc(sizeof(plr_function));
 	if (function == NULL)
-		elog(ERROR, "plr: out of memory");
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("out of memory")));
+
 	MemSet(function, 0, sizeof(plr_function));
 
 	function->proname = pstrdup(proname);
@@ -600,7 +637,8 @@ do_compile(FunctionCallInfo fcinfo,
 	{
 		xpfree(function->proname);
 		xpfree(function);
-		elog(ERROR, "plr: cache lookup for language %u failed",
+		/* internal error */
+		elog(ERROR, "cache lookup failed for language %u",
 			 procStruct->prolang);
 	}
 	langStruct = (Form_pg_language) GETSTRUCT(langTup);
@@ -632,7 +670,8 @@ do_compile(FunctionCallInfo fcinfo,
 		{
 			xpfree(function->proname);
 			xpfree(function);
-			elog(ERROR, "plr: cache lookup for return type %u failed",
+			/* internal error */
+			elog(ERROR, "cache lookup failed for return type %u",
 				 procStruct->prorettype);
 		}
 		typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
@@ -648,16 +687,18 @@ do_compile(FunctionCallInfo fcinfo,
 			{
 				xpfree(function->proname);
 				xpfree(function);
-				elog(ERROR, "plr functions cannot return type %s"
-					 "\n\texcept when used as triggers",
-					 format_type_be(procStruct->prorettype));
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("trigger functions may only be called as triggers")));
 			}
 			else
 			{
 				xpfree(function->proname);
 				xpfree(function);
-				elog(ERROR, "plr functions cannot return type %s",
-					 format_type_be(procStruct->prorettype));
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("plr functions cannot return type %s",
+								format_type_be(procStruct->prorettype))));
 			}
 		}
 
@@ -726,7 +767,8 @@ do_compile(FunctionCallInfo fcinfo,
 			{
 				xpfree(function->proname);
 				xpfree(function);
-				elog(ERROR, "plr: cache lookup for argument type %u failed",
+				/* internal error */
+				elog(ERROR, "cache lookup failed for argument type %u",
 					 function->arg_typid[i]);
 			}
 			typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
@@ -737,8 +779,10 @@ do_compile(FunctionCallInfo fcinfo,
 			{
 				xpfree(function->proname);
 				xpfree(function);
-				elog(ERROR, "plr functions cannot take type %s",
-					 format_type_be(function->arg_typid[i]));
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("plr functions cannot take type %s",
+								format_type_be(function->arg_typid[i]))));
 			}
 
 			if (typeStruct->typrelid != InvalidOid)
@@ -821,7 +865,8 @@ do_compile(FunctionCallInfo fcinfo,
 	{
 		xpfree(function->proname);
 		xpfree(function);
-		elog(ERROR, "plr: cannot create internal procedure %s",
+		/* internal error */
+		elog(ERROR, "cannot create internal procedure %s",
 			 internal_proname);
 	}
 
@@ -851,9 +896,16 @@ plr_parse_func_body(const char *body)
 	{
 	    UNPROTECT(2);
 		if (last_R_error_msg)
-			elog(ERROR, "%s", last_R_error_msg);
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("R interpreter parse error"),
+					 errdetail("%s", last_R_error_msg)));
 		else
-			elog(ERROR, "R parse error in function body");
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("R interpreter parse error"),
+					 errdetail("R parse error caught " \
+							   "in \"%s\".", body)));
 	}
 
 	UNPROTECT(2);
@@ -894,9 +946,14 @@ call_r_func(SEXP fun, SEXP rargs)
 	if(errorOccurred)
 	{
 		if (last_R_error_msg)
-			elog(ERROR, "%s", last_R_error_msg);
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("R interpreter expression evaluation error"),
+					 errdetail("%s", last_R_error_msg)));
 		else
-			elog(ERROR, "%s", "caught error calling R function");
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("R interpreter expression evaluation error")));
 	}
 	return ans;
 }

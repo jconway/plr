@@ -152,7 +152,8 @@ select mean('{1.23,1.31,1.42,1.27}'::_float8);
 -- generates appropriate error message
 create or replace function sprintf(text,text,text) returns text as 'sprintf(arg1,arg2,arg3)' language 'plr';
 select sprintf('%s is %f feet tall', 'Sven', '7') as error;
-ERROR:  Error in sprintf(arg1, arg2, arg3) : use format %s for character objects
+ERROR:  R interpreter expression evaluation error
+DETAIL:  Error in sprintf(arg1, arg2, arg3) : use format %s for character objects
 CONTEXT:  In PL/R function sprintf
 -- this one works
 select sprintf('%s is %s feet tall', 'Sven', '7');
@@ -246,7 +247,7 @@ select test_dt();
 -- generates expected error
 create or replace function test_di() returns int as 'as.data.frame(array(1:10,c(2,5)))' language 'plr';
 select test_di() as error;
-ERROR:  pg_atoi: error in "c(1, 2)": can't parse "c(1, 2)"
+ERROR:  invalid input syntax for integer: "c(1, 2)"
 CONTEXT:  In PL/R function test_di
 create or replace function test_vta() returns text[] as 'array(1:10,c(2,5))' language 'plr';
 select test_vta();
@@ -307,7 +308,7 @@ select test_dta2();
 -- generates expected error
 create or replace function test_dia1() returns int[] as 'as.data.frame(array(letters[1:10], c(2,5)))' language 'plr';
 select test_dia1() as error;
-ERROR:  pg_atoi: error in "a": can't parse "a"
+ERROR:  invalid input syntax for integer: "a"
 CONTEXT:  In PL/R function test_dia1
 create or replace function test_dtup() returns setof record as 'data.frame(letters[1:10],1:10)' language 'plr';
 select * from test_dtup() as t(f1 text, f2 int);

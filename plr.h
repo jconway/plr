@@ -274,8 +274,8 @@ extern int Rf_initEmbeddedR(int argc, char **argv);
 
 /* PL/R language handler */
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
-extern void start_interp(void);
-extern void plr_init_load_modules(MemoryContext	plr_SPI_context);
+extern void plr_init(void);
+extern void plr_load_modules(MemoryContext plr_SPI_context);
 extern void load_r_cmd(const char *cmd);
 extern SEXP call_r_func(SEXP fun, SEXP rargs);
 

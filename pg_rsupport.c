@@ -145,7 +145,9 @@ plr_SPI_exec(SEXP rsql)
 	PROTECT(rsql =  AS_CHARACTER(rsql));
 	sql = CHAR(STRING_ELT(rsql, 0));
 	if (sql == NULL)
-		elog(ERROR, "plr: cannot exec empty query");
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("cannot exec empty query")));
 
 	/* switch to SPI memory context */
 	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
@@ -185,26 +187,26 @@ plr_SPI_exec(SEXP rsql)
 			break;
 
 		case SPI_ERROR_ARGUMENT:
-			elog(ERROR, "plr: SPI_exec() failed - SPI_ERROR_ARGUMENT");
+			elog(ERROR, "SPI_exec() failed - SPI_ERROR_ARGUMENT");
 
 		case SPI_ERROR_UNCONNECTED:
-			elog(ERROR, "plr: SPI_exec() failed - SPI_ERROR_UNCONNECTED");
+			elog(ERROR, "SPI_exec() failed - SPI_ERROR_UNCONNECTED");
 
 		case SPI_ERROR_COPY:
-			elog(ERROR, "plr: SPI_exec() failed - SPI_ERROR_COPY");
+			elog(ERROR, "SPI_exec() failed - SPI_ERROR_COPY");
 
 		case SPI_ERROR_CURSOR:
-			elog(ERROR, "plr: SPI_exec() failed - SPI_ERROR_CURSOR");
+			elog(ERROR, "SPI_exec() failed - SPI_ERROR_CURSOR");
 
 		case SPI_ERROR_TRANSACTION:
-			elog(ERROR, "plr: SPI_exec() failed - SPI_ERROR_TRANSACTION");
+			elog(ERROR, "SPI_exec() failed - SPI_ERROR_TRANSACTION");
 
 		case SPI_ERROR_OPUNKNOWN:
-			elog(ERROR, "plr: SPI_exec() failed - SPI_ERROR_OPUNKNOWN");
+			elog(ERROR, "SPI_exec() failed - SPI_ERROR_OPUNKNOWN");
 
 		default:
 			snprintf(buf, sizeof(buf), "%d", spi_rc);
-			elog(ERROR, "plr: SPI_exec() failed - unknown RC");
+			elog(ERROR, "SPI_exec() failed - unknown RC");
 	}
 
 	/*
@@ -281,11 +283,16 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	PROTECT(rsql =  AS_CHARACTER(rsql));
 	sql = CHAR(STRING_ELT(rsql, 0));
 	if (sql == NULL)
-		elog(ERROR, "plr: cannot prepare empty query");
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("cannot prepare empty query")));
 
 	PROTECT(rargtypes = AS_INTEGER(rargtypes));
 	if (!isVector(rargtypes) || !isInteger(rargtypes))
-		elog(ERROR, "plr: second parameter must be a vector of PostgreSQL datatypes");
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("second parameter must be a vector of PostgreSQL " \
+						"datatypes")));
 
 	/* deal with case of no parameters for the prepared query */
 	if (rargtypes == R_MissingArg || INTEGER(rargtypes)[0] == NA_INTEGER)
@@ -294,7 +301,10 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 		nargs = length(rargtypes);
 
 	if (nargs < 0)	/* can this even happen?? */
-		elog(ERROR, "plr: second parameter must be a vector of PostgreSQL datatypes");
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("second parameter must be a vector of PostgreSQL " \
+						"datatypes")));
 
 	if (nargs > 0)
 	{
@@ -382,7 +392,8 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 
 		}
 
-		elog(ERROR, "plr: SPI_prepare failed - %s", reason);
+		/* internal error */
+		elog(ERROR, "SPI_prepare failed - %s", reason);
 	}
 
 	/* SPI_saveplan already uses TopMemoryContext */
@@ -409,7 +420,8 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 
 		}
 
-		elog(ERROR, "plr: SPI_saveplan failed - %s", reason);
+		/* internal error */
+		elog(ERROR, "SPI_saveplan failed - %s", reason);
 	}
 
 	/* back to caller's memory context */
@@ -461,11 +473,17 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	if (nargs > 0)
 	{
 		if (!IS_LIST(rargvalues))
-			elog(ERROR, "plr: second parameter must be a list of arguments to the prepared plan");
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("second parameter must be a list of arguments " \
+							"to the prepared plan")));
 
 		if (length(rargvalues) != nargs)
-			elog(ERROR, "plr: list of arguments (%d) is not the same length as " \
-						"that of the prepared plan (%d)", length(rargvalues), nargs);
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("list of arguments (%d) is not the same length " \
+							"as that of the prepared plan (%d)",
+							length(rargvalues), nargs)));
 
 		argvalues = (Datum *) palloc(nargs * sizeof(Datum));
 		nulls = (char *) palloc(nargs * sizeof(char));
@@ -523,26 +541,26 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 			break;
 
 		case SPI_ERROR_ARGUMENT:
-			elog(ERROR, "plr: SPI_execp() failed - SPI_ERROR_ARGUMENT");
+			elog(ERROR, "SPI_execp() failed - SPI_ERROR_ARGUMENT");
 
 		case SPI_ERROR_UNCONNECTED:
-			elog(ERROR, "plr: SPI_execp() failed - SPI_ERROR_UNCONNECTED");
+			elog(ERROR, "SPI_execp() failed - SPI_ERROR_UNCONNECTED");
 
 		case SPI_ERROR_COPY:
-			elog(ERROR, "plr: SPI_execp() failed - SPI_ERROR_COPY");
+			elog(ERROR, "SPI_execp() failed - SPI_ERROR_COPY");
 
 		case SPI_ERROR_CURSOR:
-			elog(ERROR, "plr: SPI_execp() failed - SPI_ERROR_CURSOR");
+			elog(ERROR, "SPI_execp() failed - SPI_ERROR_CURSOR");
 
 		case SPI_ERROR_TRANSACTION:
-			elog(ERROR, "plr: SPI_execp() failed - SPI_ERROR_TRANSACTION");
+			elog(ERROR, "SPI_execp() failed - SPI_ERROR_TRANSACTION");
 
 		case SPI_ERROR_OPUNKNOWN:
-			elog(ERROR, "plr: SPI_execp() failed - SPI_ERROR_OPUNKNOWN");
+			elog(ERROR, "SPI_execp() failed - SPI_ERROR_OPUNKNOWN");
 
 		default:
 			snprintf(buf, sizeof(buf), "%d", spi_rc);
-			elog(ERROR, "plr: SPI_execp() failed - unknown RC");
+			elog(ERROR, "SPI_execp() failed - unknown RC");
 	}
 
 	/*

@@ -50,12 +50,16 @@ reload_plr_modules(PG_FUNCTION_ARGS)
 {
 	/* Connect to SPI manager */
 	if (SPI_connect() != SPI_OK_CONNECT)
-		elog(ERROR, "plr: cannot connect to SPI manager");
+		ereport(ERROR,
+				(errcode(ERRCODE_CONNECTION_FAILURE),
+				 errmsg("cannot connect to SPI manager")));
 
-	plr_init_load_modules(CurrentMemoryContext);
+	plr_load_modules(CurrentMemoryContext);
 
 	if (SPI_finish() != SPI_OK_FINISH)
-		elog(ERROR, "reload_plr_modules: SPI_finish() failed");
+		ereport(ERROR,
+				(errcode(ERRCODE_CONNECTION_EXCEPTION),
+				 errmsg("SPI_finish() failed")));
 
 	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
 }
@@ -119,7 +123,9 @@ plr_array_push(PG_FUNCTION_ARGS)
 
 	/* Sanity check: do we have a one-dimensional array */
 	if (ARR_NDIM(v) != 1)
-		elog(ERROR, "array_push: only one-dimensional arrays are supported");
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("input must be one-dimensional array")));
 
 	lb = ARR_LBOUND(v);
 	dimv = ARR_DIMS(v);
@@ -129,7 +135,8 @@ plr_array_push(PG_FUNCTION_ARGS)
 	element_type = ARR_ELEMTYPE(v);
 	/* Sanity check: do we have a non-zero element type */
 	if (element_type == 0)
-		elog(ERROR, "array_push: invalid array element type");
+		/* internal error */
+		elog(ERROR, "invalid array element type");
 
 	get_typlenbyvalalign(element_type, &typlen, &typbyval, &typalign);
 
@@ -202,7 +209,9 @@ plr_array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
 	ArrayType  *result;
 
 	if (numelems == 0)
-		elog(ERROR, "array: at least one value required to construct an array");
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("at least one value required to construct an array")));
 
 	/*
 	 * Get the type metadata for the array return type and its elements
@@ -211,7 +220,8 @@ plr_array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
 						ObjectIdGetDatum(funcid),
 						0, 0, 0);
 	if (!HeapTupleIsValid(tp))
-		elog(ERROR, "Function OID %u does not exist", funcid);
+		/* internal error */
+		elog(ERROR, "function OID %u does not exist", funcid);
 
 	functypeid = ((Form_pg_proc) GETSTRUCT(tp))->prorettype;
 	getTypeInputInfo(functypeid, &typinput, &element_type);
@@ -227,8 +237,11 @@ plr_array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
 	 */
 	for (i = elem_start; i < elem_start + numelems; i++)
 		if (funcargtypes[i] != element_type)
-			elog(ERROR, "plr_array_create: argument %d datatype not " \
-						"compatible with return data type", i + 1);
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("argument %d datatype not " \
+							"compatible with return data type", i + 1)));
+
 	ReleaseSysCache(tp);
 
 	for (i = 0; i < numelems; i++)
@@ -264,8 +277,10 @@ plr_environ(PG_FUNCTION_ARGS)
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (!rsinfo || !(rsinfo->allowedModes & SFRM_Materialize))
-		elog(ERROR, "plr_environ: materialize mode required, but it is not "
-			 "allowed in this context");
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("materialize mode required, but it is not "
+						"allowed in this context")));
 
 	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
@@ -279,8 +294,10 @@ plr_environ(PG_FUNCTION_ARGS)
 	if (tupdesc->natts != 2 ||
 		tupdesc->attrs[0]->atttypid != TEXTOID ||
 		tupdesc->attrs[1]->atttypid != TEXTOID)
-		elog(ERROR, "plr_environ: query-specified return tuple and " \
-					"plr_environ function are not compatible");
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("query-specified return tuple and "
+						"function return type are not compatible")));
 
 	/* OK to use it */
 	attinmeta = TupleDescGetAttInMetadata(tupdesc);

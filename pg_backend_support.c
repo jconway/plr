@@ -200,6 +200,7 @@ get_type_io_data(Oid typid,
 							   ObjectIdGetDatum(typid),
 							   0, 0, 0);
 	if (!HeapTupleIsValid(typeTuple))
+		/* internal error */
 		elog(ERROR, "cache lookup failed for type %u", typid);
 	typeStruct = (Form_pg_type) GETSTRUCT(typeTuple);
 
@@ -294,9 +295,11 @@ compute_function_hashkey(FmgrInfo *flinfo,
 		{
 			argtypeid = get_fn_expr_argtype(flinfo, i);
 			if (!OidIsValid(argtypeid))
-				elog(ERROR, "could not determine actual argument "
-					 "type for polymorphic function %s",
-					 NameStr(procStruct->proname));
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("could not determine actual argument "
+								"type for polymorphic function \"%s\"",
+								NameStr(procStruct->proname))));
 		}
 
 		hashkey->argtypes[i] = argtypeid;
@@ -345,7 +348,9 @@ plr_HashTableInsert(plr_function *function,
 										HASH_ENTER,
 										&found);
 	if (hentry == NULL)
-		elog(ERROR, "out of memory in plr_HashTable");
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("out of memory")));
 	if (found)
 		elog(WARNING, "trying to insert a function that exists");
 
@@ -386,8 +391,8 @@ get_lib_pathstr(Oid funcid)
 									ObjectIdGetDatum(funcid),
 									0, 0, 0);
 	if (!HeapTupleIsValid(procedureTuple))
-		elog(ERROR, "get_lib_pathstr: cache lookup for function %u failed",
-			 funcid);
+		/* internal error */
+		elog(ERROR, "cache lookup failed for function %u", funcid);
 	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
 
 	/* now get the pg_language entry */
@@ -398,8 +403,8 @@ get_lib_pathstr(Oid funcid)
 								   ObjectIdGetDatum(language),
 								   0, 0, 0);
 	if (!HeapTupleIsValid(languageTuple))
-		elog(ERROR, "get_lib_pathstr: cache lookup for language %u failed",
-			 language);
+		/* internal error */
+		elog(ERROR, "cache lookup failed for language %u", language);
 	languageStruct = (Form_pg_language) GETSTRUCT(languageTuple);
 	lang_funcid = languageStruct->lanplcallfoid;
 	ReleaseSysCache(languageTuple);
@@ -409,8 +414,8 @@ get_lib_pathstr(Oid funcid)
 									ObjectIdGetDatum(lang_funcid),
 									0, 0, 0);
 	if (!HeapTupleIsValid(procedureTuple))
-		elog(ERROR, "get_lib_pathstr: cache lookup for function %u failed",
-			 lang_funcid);
+		/* internal error */
+		elog(ERROR, "cache lookup failed for function %u", lang_funcid);
 	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
 
 	tmp = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_probin, &isnull);
@@ -449,7 +454,9 @@ file_exists(const char *name)
 	if (stat(name, &st) == 0)
 		return S_ISDIR(st.st_mode) ? false : true;
 	else if (!(errno == ENOENT || errno == ENOTDIR || errno == EACCES))
-		elog(ERROR, "stat failed on %s: %s", name, strerror(errno));
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				errmsg("could not access file \"%s\": %m", name)));
 
 	return false;
 }
@@ -532,7 +539,9 @@ substitute_libpath_macro(const char *name)
 	if (strncmp(name, "$libdir", macroname_len) == 0)
 		replacement = PKGLIBDIR;
 	else
-		elog(ERROR, "invalid macro name in dynamic library path");
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_NAME),
+				 errmsg("invalid macro name in dynamic library path")));
 
 	if (name[macroname_len] == '\0')
 		return pstrdup(replacement);
@@ -582,7 +591,9 @@ find_in_dynamic_libpath(const char *basename)
 		len = strcspn(p, ":");
 
 		if (len == 0)
-			elog(ERROR, "zero length dynamic_library_path component");
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_NAME),
+					 errmsg("zero-length component in DYNAMIC_LIBRARY_PATH")));
 
 		piece = palloc(len + 1);
 		strncpy(piece, p, len);
@@ -593,7 +604,9 @@ find_in_dynamic_libpath(const char *basename)
 
 		/* only absolute paths */
 		if (mangled[0] != '/')
-			elog(ERROR, "dynamic_library_path component is not absolute");
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_NAME),
+					 errmsg("DYNAMIC_LIBRARY_PATH component is not absolute")));
 
 		full = palloc(strlen(mangled) + 1 + baselen + 1);
 		sprintf(full, "%s/%s", mangled, basename);
