@@ -135,11 +135,15 @@ do { \
 #define CurrentTriggerData ((TriggerData *) fcinfo->context)
 
 /* convert C string to text pointer */
-#define GET_TEXT(cstrp) \
-	DatumGetTextP(DirectFunctionCall1(textin, CStringGetDatum(cstrp)))
-/* convert text pointer to C string */
-#define GET_STR(textp) \
-	DatumGetCString(DirectFunctionCall1(textout, PointerGetDatum(textp)))
+#define PG_TEXT_GET_STR(textp_) \
+	DatumGetCString(DirectFunctionCall1(textout, PointerGetDatum(textp_)))
+#define PG_STR_GET_TEXT(str_) \
+	DatumGetTextP(DirectFunctionCall1(textin, CStringGetDatum(str_)))
+#define PG_REPLACE_STR(str_, substr_, replacestr_) \
+	PG_TEXT_GET_STR(DirectFunctionCall3(replace_text, \
+										PG_STR_GET_TEXT(str_), \
+										PG_STR_GET_TEXT(substr_), \
+										PG_STR_GET_TEXT(replacestr_)))
 
 /*
  * structs
@@ -247,7 +251,6 @@ plr_call_handler(PG_FUNCTION_ARGS)
 	plr_call_level--;
 
 	return retval;
-
 }
 
 /*
@@ -357,7 +360,11 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	if(rvalue != R_NilValue)
 		retval = r_get_pg(rvalue, prodesc->result_in_func, prodesc->result_in_elem);
 	else
-		retval = (Datum) NULL;
+	{
+		/* return NULL if R code returned undef */
+		retval = (Datum) 0;
+		fcinfo->isnull = true;
+	}
 
 	/* switch back to old memory context */
 	MemoryContextSwitchTo(oldcontext);
@@ -397,10 +404,7 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 	proname = pstrdup(NameStr(procStruct->proname));
 
 	/* Build our internal proc name from the functions Oid */
-	if (!is_trigger)
-		sprintf(internal_proname, "PLR.%s.%u", proname, fn_oid);
-	else
-		sprintf(internal_proname, "PLR.%s.%u_trigger", proname, fn_oid);
+	sprintf(internal_proname, "PLR%u", fn_oid);
 
 	/* Lookup the prodesc in the hashtable based on internal_proname */
 	prodesc = GetProdescByName(internal_proname);
@@ -550,15 +554,7 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 				}
 
 				if (typeStruct->typrelid != InvalidOid)
-				{
 					prodesc->arg_is_rel[i] = 1;
-					if (i > 0)
-						appendStringInfo(proc_internal_args, " ");
-
-					appendStringInfo(proc_internal_args, "__PLR_Tup_%d", i + 1);
-					ReleaseSysCache(typeTup);
-					continue;
-				}
 				else
 					prodesc->arg_is_rel[i] = 0;
 
@@ -567,8 +563,8 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 				prodesc->arg_elem[i] = typeStruct->typelem;
 
 				if (i > 0)
-					appendStringInfo(proc_internal_args, " ");
-				appendStringInfo(proc_internal_args, "pg%d", i + 1);
+					appendStringInfo(proc_internal_args, ",");
+				appendStringInfo(proc_internal_args, "arg%d", i + 1);
 
 				ReleaseSysCache(typeTup);
 			}
@@ -577,7 +573,7 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 		{
 			/* trigger procedure has fixed args */
 			appendStringInfo(proc_internal_args,
-				"TG_name TG_relid TG_relatts TG_when TG_level TG_op __PLR_Tup_NEW __PLR_Tup_OLD args");
+				"TGname,TGrelid,TGrelatts,TGwhen,TGlevel,TGop,TGnew,TGold,args");
 		}
 
 		/*
@@ -620,18 +616,18 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 		proc_source = DatumGetCString(DirectFunctionCall1(textout,
 								  PointerGetDatum(&procStruct->prosrc)));
 
-		appendStringInfo(proc_internal_def, "%s\n}", proc_source);
+		appendStringInfo(proc_internal_def, "%s}", proc_source);
 
 		/* parse or find the R function */
 		if(proc_source && proc_source[0])
 		{
-			prodesc->fun = plr_parseFunctionBody(proc_internal_def->data);
 elog(NOTICE, "parse: %s", proc_internal_def->data);
+			prodesc->fun = plr_parseFunctionBody(proc_internal_def->data);
 		}
 		else
 		{
-			prodesc->fun = Rf_findFun(Rf_install(proname), R_GlobalEnv);
 elog(NOTICE, "found: %s", proc_internal_def->data);
+			prodesc->fun = Rf_findFun(Rf_install(proname), R_GlobalEnv);
 		}
 
 		pfree(proc_source);
@@ -955,6 +951,7 @@ r_get_pg(SEXP rval, FmgrInfo arg_in_func, Oid arg_in_elem)
 
 	obj =  AS_CHARACTER(rval);
 	value = CHAR(STRING_ELT(obj, 0));
+elog(NOTICE, "rvalue = %s", value);
 
 	if (value != NULL)
 		dvalue = FunctionCall3(&arg_in_func,
