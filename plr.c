@@ -532,18 +532,6 @@ compile_plr_function(FunctionCallInfo fcinfo, bool is_trigger)
 	/* get the functions return type */
 	GET_PRORETTYPE(result_typid);
 
-
-{
-	FuncExpr *funcexpr = (FuncExpr *) fcinfo->flinfo->fn_expr;
-	if (0 > funcexpr->nargs - 1)
-		elog(ERROR, "funcexpr->nargs %d", funcexpr->nargs);
-}
-
-
-
-
-
-
 	/* get the number and type of arguments */
 	GET_PROARGS(nargs, arg_typid);
 

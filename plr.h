@@ -217,8 +217,14 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 #define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, false, SortMem)
 #define GET_PRORETTYPE(prorettype_) \
 	do { \
-		prorettype_ = get_expr_rettype(fcinfo); \
-		if (prorettype_ == InvalidOid) \
+		if (procStruct->prorettype == ANYARRAYOID || \
+			procStruct->prorettype == ANYELEMENTOID) \
+		{ \
+			prorettype_ = get_expr_rettype(fcinfo); \
+			if (prorettype_ == InvalidOid) \
+				prorettype_ = procStruct->prorettype; \
+		} \
+		else \
 			prorettype_ = procStruct->prorettype; \
 	} while (0)
 
@@ -227,7 +233,17 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 		int i; \
 		pronargs_ = procStruct->pronargs; \
 		for (i = 0; i < pronargs_; i++) \
-			proargtypes_[i] = get_expr_argtype(fcinfo, i); \
+		{ \
+			if (procStruct->proargtypes[i] == ANYARRAYOID || \
+				procStruct->proargtypes[i] == ANYELEMENTOID) \
+			{ \
+				proargtypes_[i] = get_expr_argtype(fcinfo, i); \
+				if (proargtypes_[i] == InvalidOid) \
+					proargtypes_[i] = procStruct->proargtypes[i]; \
+			} \
+			else \
+				proargtypes_[i] = procStruct->proargtypes[i]; \
+		} \
 	} while (0)
 
 #define CHECK_POLYMORPHIC_TYPES \
