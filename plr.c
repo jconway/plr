@@ -630,13 +630,6 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 				procStruct->prorettype == RECORDOID)
 				prodesc->result_istuple = true;
 
-			if (typeStruct->typrelid != InvalidOid)
-			{
-				free(prodesc->proname);
-				free(prodesc);
-				elog(ERROR, "plr: return types of tuples not supported yet");
-			}
-
 			prodesc->result_typid = procStruct->prorettype;
 			perm_fmgr_info(typeStruct->typinput, &(prodesc->result_in_func));
 			prodesc->result_elem = typeStruct->typelem;

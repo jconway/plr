@@ -166,6 +166,24 @@ create or replace function test_vtup() returns record as 'as.vector(array(1:15,c
 select * from test_vtup() as t(f1 int);
 
 --
+-- try again with named tuple types
+--
+CREATE TYPE dtup AS (f1 text, f2 int);
+CREATE TYPE mtup AS (f1 int, f2 int, f3 int);
+CREATE TYPE vtup AS (f1 int);
+
+create or replace function test_dtup1() returns dtup as 'data.frame(letters[1:10],1:10)' language 'plr';
+select * from test_dtup1();
+
+create or replace function test_mtup1() returns mtup as 'as.matrix(array(1:15,c(5,3)))' language 'plr';
+select * from test_mtup1();
+
+create or replace function test_vtup1() returns vtup as 'as.vector(array(1:15,c(5,3)))' language 'plr';
+select * from test_vtup1();
+
+
+
+--
 -- test pg R support functions (e.g. SPI_exec)
 --
 create or replace function pg_quote_ident(text) returns text as 'pg_quote_ident(arg1)' language 'plr';

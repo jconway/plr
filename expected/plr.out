@@ -350,6 +350,60 @@ select * from test_vtup() as t(f1 int);
 (15 rows)
 
 --
+-- try again with named tuple types
+--
+CREATE TYPE dtup AS (f1 text, f2 int);
+CREATE TYPE mtup AS (f1 int, f2 int, f3 int);
+CREATE TYPE vtup AS (f1 int);
+create or replace function test_dtup1() returns dtup as 'data.frame(letters[1:10],1:10)' language 'plr';
+select * from test_dtup1();
+ f1 | f2 
+----+----
+ a  |  1
+ b  |  2
+ c  |  3
+ d  |  4
+ e  |  5
+ f  |  6
+ g  |  7
+ h  |  8
+ i  |  9
+ j  | 10
+(10 rows)
+
+create or replace function test_mtup1() returns mtup as 'as.matrix(array(1:15,c(5,3)))' language 'plr';
+select * from test_mtup1();
+ f1 | f2 | f3 
+----+----+----
+  1 |  6 | 11
+  2 |  7 | 12
+  3 |  8 | 13
+  4 |  9 | 14
+  5 | 10 | 15
+(5 rows)
+
+create or replace function test_vtup1() returns vtup as 'as.vector(array(1:15,c(5,3)))' language 'plr';
+select * from test_vtup1();
+ f1 
+----
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+ 10
+ 11
+ 12
+ 13
+ 14
+ 15
+(15 rows)
+
+--
 -- test pg R support functions (e.g. SPI_exec)
 --
 create or replace function pg_quote_ident(text) returns text as 'pg_quote_ident(arg1)' language 'plr';
