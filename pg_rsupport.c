@@ -36,10 +36,7 @@ extern MemoryContext plr_SPI_context;
 extern char *last_R_error_msg;
 
 static SEXP rpgsql_get_results(int ntuples, SPITupleTable *tuptable);
-
-#ifndef PG_VERSION_73_COMPAT
 static void rsupport_error_callback(void *arg);
-#endif
 
 /* The information we cache prepared plans */
 typedef struct saved_plan_desc
@@ -605,11 +602,6 @@ throw_r_error(const char **msg)
 		last_R_error_msg = pstrdup("caught error calling R function");
 }
 
-#ifndef PG_VERSION_73_COMPAT
-/*************************************************************************
- * working with postgres 7.4 compatible sources
- *************************************************************************/
-
 /*
  * error context callback to let us supply a call-stack traceback
  */
@@ -619,5 +611,3 @@ rsupport_error_callback(void *arg)
 	if (arg)
 		errcontext("In R support function %s", (char *) arg);
 }
-
-#endif /* not PG_VERSION_73_COMPAT */

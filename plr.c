@@ -114,10 +114,7 @@ static plr_function *do_compile(FunctionCallInfo fcinfo,
 							    plr_func_hashkey *hashkey);
 static SEXP plr_parse_func_body(const char *body);
 static SEXP plr_convertargs(plr_function *function, FunctionCallInfo fcinfo);
-
-#ifndef PG_VERSION_73_COMPAT
 static void plr_error_callback(void *arg);
-#endif
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -831,7 +828,7 @@ do_compile(FunctionCallInfo fcinfo,
 	{
 		/* trigger procedure has fixed args */
 		appendStringInfo(proc_internal_args,
-			"TGname,TGrelid,TGrelatts,TGwhen,TGlevel,TGop,TGnew,TGold,args");
+			"tg.name,tg.relid,tg.relatts,tg.when,tg.level,tg.op,tg.new,tg.old,args");
 	}
 
 	/*
@@ -1021,8 +1018,6 @@ plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
 	return(rargs);
 }
 
-#ifndef PG_VERSION_73_COMPAT
-
 /*
  * error context callback to let us supply a call-stack traceback
  */
@@ -1032,5 +1027,3 @@ plr_error_callback(void *arg)
 	if (arg)
 		errcontext("In PL/R function %s", (char *) arg);
 }
-
-#endif /* not PG_VERSION_73_COMPAT */
