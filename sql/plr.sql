@@ -121,11 +121,10 @@ select test_mt();
 create or replace function test_mi() returns int as 'as.matrix(array(1:10,c(2,5)))' language 'plr';
 select test_mi();
 
-create or replace function test_dt() returns text as 'as.data.frame(array(1:10,c(2,5)))' language 'plr';
+create or replace function test_dt() returns text as 'as.data.frame(array(1:10,c(2,5)))[[1]]' language 'plr';
 select test_dt();
 
--- generates expected error
-create or replace function test_di() returns int as 'as.data.frame(array(1:10,c(2,5)))' language 'plr';
+create or replace function test_di() returns int as 'as.data.frame(array(1:10,c(2,5)))[[1]]' language 'plr';
 select test_di() as error;
 
 create or replace function test_vta() returns text[] as 'array(1:10,c(2,5))' language 'plr';
@@ -195,7 +194,7 @@ select pg_quote_ident('Hello World');
 create or replace function pg_quote_literal(text) returns text as 'pg.quoteliteral(arg1)' language 'plr';
 select pg_quote_literal('Hello\'World');
 
-create or replace function test_spi_t(text) returns text as 'pg.spi.exec(arg1)' language 'plr';
+create or replace function test_spi_t(text) returns text as '(pg.spi.exec(arg1))[[1]]' language 'plr';
 select test_spi_t('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''');
 
 create or replace function test_spi_ta(text) returns text[] as 'pg.spi.exec(arg1)' language 'plr';
