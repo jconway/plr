@@ -55,11 +55,23 @@
    </programlisting>
   </para>
 
+  <para>
+   As of PostgreSQL 8.0.0, PL/R can also be built without the PostgreSQL source
+   tree. Untar PL/R whereever you prefer. The shared object for the R call handler
+   is built and installed in the PostgreSQL library directory via the following
+   commands (starting from <literal>/path/to/plr</literal>):
+   <programlisting>
+    cd plr
+    make -f Makefile.pgxs
+    make -f Makefile.pgxs install
+   </programlisting>
+  </para>
+
   <note>
    <para>
-   PL/R should build cleanly with PostgreSQL 7.3.x, and 7.4beta. It was
-   initially developed using libR from R 1.6.2 under Red Hat 7.3 & 8.0. PL/R
-   has also passed its regression test with R 1.7.1 under Red Hat 7.3, 8.0, & 9.
+   PL/R should build cleanly with PostgreSQL 7.3.x, 7.4.x, and 8.0.x. and
+   R 1.6.2 and newer. The current release passed its regression test with
+   R 2.0.1 under Fedora Core 2.
    </para>
   </note>
 
@@ -90,8 +102,8 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
 
   <tip>
    <para>
-    In addition to the documentation, the <literal>plr.out</literal> file
-    in <literal>plr/expected</literal> is a good source of usage examples.
+    In addition to the documentation, the <literal>plr.out.*</literal> files
+    in <literal>plr/expected</literal> are a good source of usage examples.
    </para>
   </tip>
 
@@ -150,11 +162,10 @@ CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS '
 ' LANGUAGE 'plr' STRICT;
     </programlisting>
 
-    Starting with PostgreSQL 7.5 (or whatever the next major release after 7.4
-    ends up being called), arguments may be explicitly named when creating a
-    function. If an argument is explicitly named at function creation time,
-    that name will be available to your R script in place of the usual
-    <literal>argN</literal> variable. For example:
+    Starting with PostgreSQL 8.0, arguments may be explicitly named when
+    creating a function. If an argument is explicitly named at function
+    creation time, that name will be available to your R script in place
+    of the usual <literal>argN</literal> variable. For example:
 
     <programlisting>
 CREATE OR REPLACE FUNCTION sd(vals float8[]) RETURNS float AS '

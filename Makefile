@@ -1,5 +1,6 @@
 # location of R library
-r_libdir = ${R_HOME}/bin
+r_libdir1x = ${R_HOME}/bin
+r_libdir2x = ${R_HOME}/lib
 # location of R includes
 r_includespec = ${R_HOME}/include
 
@@ -15,11 +16,11 @@ include $(top_builddir)/src/Makefile.global
 # Since there is no official way to determine this,
 # we see if there is a file that is named like a shared library.
 ifneq ($(PORTNAME), darwin)
-ifneq (,$(wildcard $(r_libdir)/libR*$(DLSUFFIX)*))
+ifneq (,$(wildcard $(r_libdir1x)/libR*$(DLSUFFIX)*)$(wildcard $(r_libdir2x)/libR*$(DLSUFFIX)*))
 	shared_libr = yes;
 endif
 else
-ifneq (,$(wildcard $(r_libdir)/libR*$(DYSUFFIX)*))
+ifneq (,$(wildcard $(r_libdir1x)/libR*$(DYSUFFIX)*)$(wildcard $(r_libdir2x)/libR*$(DYSUFFIX)*))
 	shared_libr = yes
 endif
 endif
@@ -36,7 +37,7 @@ MODULE_big	:= plr
 PG_CPPFLAGS	+= -I$(r_includespec)
 SRCS		+= plr.c pg_conversion.c pg_backend_support.c pg_userfuncs.c pg_rsupport.c
 OBJS		:= $(SRCS:.c=.o)
-SHLIB_LINK	+= -L$(r_libdir) -lR
+SHLIB_LINK	+= -L$(r_libdir1x) -L$(r_libdir2x) -lR
 
 DATA_built	:= plr.sql 
 DOCS		:= README.plr

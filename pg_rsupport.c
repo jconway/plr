@@ -135,7 +135,6 @@ plr_SPI_exec(SEXP rsql)
 	SEXP			result = NULL;
 	MemoryContext	oldcontext;
 	PREPARE_PG_TRY;
-	ERRORCONTEXTCALLBACK;
 
 	/* set up error context */
 	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.exec");
@@ -272,7 +271,6 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	SEXP				result;
 	MemoryContext		oldcontext;
 	PREPARE_PG_TRY;
-	ERRORCONTEXTCALLBACK;
 
 	/* set up error context */
 	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.prepare");
@@ -468,7 +466,6 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	SEXP				result = NULL;
 	MemoryContext		oldcontext;
 	PREPARE_PG_TRY;
-	ERRORCONTEXTCALLBACK;
 
 	/* set up error context */
 	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.execp");

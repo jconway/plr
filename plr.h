@@ -83,7 +83,7 @@
 #elif (CATALOG_VERSION_NO <= 200310211)
 #define PG_VERSION_74_COMPAT
 #else
-#define PG_VERSION_75_COMPAT
+#define PG_VERSION_80_COMPAT
 #endif
 
 #ifdef DEBUGPROTECT
@@ -262,12 +262,12 @@ typedef enum IOFuncSelector
 
 #else
 /*************************************************************************
- * working with postgres 7.4 or 7.5 compatible sources
+ * working with postgres 7.4 or 8.0 compatible sources
  *************************************************************************/
 
 #ifdef PG_VERSION_74_COMPAT
 #define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, false, SortMem)
-#else  /* 7.5 or greater */
+#else  /* 8.0 or greater */
 #define TUPLESTORE_BEGIN_HEAP	tuplestore_begin_heap(true, false, work_mem)
 #endif /* PG_VERSION_74_COMPAT */
 
@@ -279,9 +279,9 @@ typedef enum IOFuncSelector
 
 #endif /* PG_VERSION_73_COMPAT */
 
-#ifdef PG_VERSION_75_COMPAT
+#ifdef PG_VERSION_80_COMPAT
 /*************************************************************************
- * working with postgres 7.5 compatible sources
+ * working with postgres 8.0 compatible sources
  *************************************************************************/
 #define  PLR_CLEANUP \
 	plr_cleanup(int code, Datum arg)
@@ -372,7 +372,8 @@ typedef enum IOFuncSelector
 		if (argnames) \
 			pfree(argnames); \
 	} while (0)
-#define PREPARE_PG_TRY
+#define PREPARE_PG_TRY \
+	ERRORCONTEXTCALLBACK
 #define PLR_PG_CATCH() \
 		PG_CATCH(); \
 		{ \
@@ -385,7 +386,7 @@ typedef enum IOFuncSelector
 	PG_END_TRY()
 #else
 /*************************************************************************
- * working with earlier than postgres 7.5 compatible sources
+ * working with earlier than postgres 8.0 compatible sources
  *************************************************************************/
 #define  PLR_CLEANUP \
 	plr_cleanup(void)
@@ -437,6 +438,7 @@ typedef enum IOFuncSelector
 	} while (0)
 #define FREE_ARG_NAMES
 #define PREPARE_PG_TRY \
+	ERRORCONTEXTCALLBACK; \
 	sigjmp_buf		save_restart
 #define PG_TRY()  \
 	do { \
@@ -451,7 +453,7 @@ typedef enum IOFuncSelector
 #define PLR_PG_CATCH()
 #define PLR_PG_END_TRY() \
 	memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart))
-#endif /* PG_VERSION_75_COMPAT */
+#endif /* PG_VERSION_80_COMPAT */
 
 /*
  * structs
