@@ -115,17 +115,16 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	char	   *value;
 	ArrayType  *v = (ArrayType *) dvalue;
 	Oid			element_type;
-	int			i,
+	int			i, j,
 				nitems,
+				nr = 0,
+				nc = 0,
 				ndim,
 			   *dim;
 	char	   *p;
 
 	/* only support one-dim arrays for the moment */
 	ndim = ARR_NDIM(v);
-	if (ndim > 1)
-		elog(ERROR, "plr: multiple dimension arrays are not yet supported as function arguments");
-
 	element_type = ARR_ELEMTYPE(v);
 	dim = ARR_DIMS(v);
 	nitems = ArrayGetNItems(ndim, dim);
@@ -140,30 +139,58 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 		return result;
 	}
 
+	if (ndim < 2)
+	{
+		nr = nitems;
+		nc = 1;
+	}
+	else if (ndim == 2)
+	{
+		nr = dim[0];
+		nc = dim[1];
+	}
+	else
+		elog(ERROR, "plr: 3 (or more) dimension arrays are not yet supported as function arguments");
+
 	/* get new vector of the appropriate type and length */
 	PROTECT(result = get_r_vector(element_type, nitems));
 
 	/* Convert all values to their R form and build the vector */
 	p = ARR_DATA_PTR(v);
-	for (i = 0; i < nitems; i++)
+	for (i = 0; i < nr; i++)
 	{
-		Datum		itemvalue;
+		for (j = 0; j < nc; j++)
+		{
+			Datum		itemvalue;
+			int			idx = (j * nr) + i;
 
-		itemvalue = fetch_att(p, typbyval, typlen);
-		value = DatumGetCString(FunctionCall3(&out_func,
-												  itemvalue,
-												  (Datum) 0,
-												  Int32GetDatum(-1)));
-		p = att_addlength(p, typlen, PointerGetDatum(p));
-		p = (char *) att_align(p, typalign);
+			itemvalue = fetch_att(p, typbyval, typlen);
+			value = DatumGetCString(FunctionCall3(&out_func,
+													  itemvalue,
+													  (Datum) 0,
+													  Int32GetDatum(-1)));
+			p = att_addlength(p, typlen, PointerGetDatum(p));
+			p = (char *) att_align(p, typalign);
 
-		if (value != NULL)
-			pg_get_one_r(value, element_type, &result, i);
-		else
-			SET_STRING_ELT(result, i, NA_STRING);
+			if (value != NULL)
+				pg_get_one_r(value, element_type, &result, idx);
+			else
+				SET_STRING_ELT(result, idx, NA_STRING);
+		}
 	}
-
 	UNPROTECT(1);
+
+	if (ndim == 2)
+	{
+		SEXP	matrix_dims;
+
+		/* attach dimensions */
+		PROTECT(matrix_dims = allocVector(INTSXP, 2));
+		INTEGER_DATA(matrix_dims)[0] = dim[0];
+		INTEGER_DATA(matrix_dims)[1] = dim[1];
+		setAttrib(result, R_DimSymbol, matrix_dims);
+		UNPROTECT(1);
+	}
 
 	return result;
 }
@@ -818,7 +845,10 @@ get_frame_tuplestore(SEXP rval,
 			else
 				PROTECT(obj = AS_CHARACTER(CAR(ATTRIB(dfcol))));
 
-			values[j] = pstrdup(CHAR(STRING_ELT(obj, i)));
+			if (STRING_ELT(obj, 0) != NA_STRING)
+				values[j] = pstrdup(CHAR(STRING_ELT(obj, i)));
+			else
+				values[j] = NULL;
 
 			UNPROTECT(2);
 		}

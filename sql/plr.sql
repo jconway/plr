@@ -231,3 +231,9 @@ select r_max(null,null) is null as "NULL";
 create or replace function get_foo(int) returns foo as 'select * from foo where f0 = $1' language 'sql';
 create or replace function test_foo(foo) returns foo as 'return(arg1)' language 'plr';
 select * from test_foo(get_foo(1));
+
+--
+-- test 2D array argument
+--
+create or replace function test_in_m_tup(_int4) returns record as 'arg1' language 'plr';
+select * from test_in_m_tup('{{1,3,5},{2,4,6}}') as t(f1 int, f2 int, f3 int);

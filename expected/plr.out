@@ -422,7 +422,7 @@ select pg_quote_literal('Hello\'World');
 
 create or replace function test_spi_t(text) returns text as 'pg.spi.exec(arg1)' language 'plr';
 select test_spi_t('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''');
- test_spi_t 
+  test_spi_t   
 ---------------
  c("25", "26")
 (1 row)
@@ -516,4 +516,15 @@ select * from test_foo(get_foo(1));
 ----+------+------
   1 | cat1 | 1.21
 (1 row)
+
+--
+-- test 2D array argument
+--
+create or replace function test_in_m_tup(_int4) returns record as 'arg1' language 'plr';
+select * from test_in_m_tup('{{1,3,5},{2,4,6}}') as t(f1 int, f2 int, f3 int);
+ f1 | f2 | f3 
+----+----+----
+  1 |  3 |  5
+  2 |  4 |  6
+(2 rows)
 
