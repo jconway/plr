@@ -44,12 +44,12 @@ static Datum get_trigger_tuple(SEXP rval, plr_function *function,
 									FunctionCallInfo fcinfo, bool *isnull);
 static Datum get_tuplestore(SEXP rval, plr_function *function,
 									FunctionCallInfo fcinfo, bool *isnull);
-static Datum get_array_datum(SEXP rval, plr_function *function, bool *isnull);
-static Datum get_frame_array_datum(SEXP rval, plr_function *function,
+static Datum get_array_datum(SEXP rval, plr_function *function, int col, bool *isnull);
+static Datum get_frame_array_datum(SEXP rval, plr_function *function, int col,
 																bool *isnull);
-static Datum get_md_array_datum(SEXP rval, int ndims, plr_function *function,
+static Datum get_md_array_datum(SEXP rval, int ndims, plr_function *function, int col,
 																bool *isnull);
-static Datum get_generic_array_datum(SEXP rval, plr_function *function,
+static Datum get_generic_array_datum(SEXP rval, plr_function *function, int col,
 																bool *isnull);
 static Tuplestorestate *get_frame_tuplestore(SEXP rval,
 											 plr_function *function,
@@ -444,7 +444,7 @@ r_get_pg(SEXP rval, plr_function *function, FunctionCallInfo fcinfo)
 		if (function->result_elem == 0)
 			result = get_scalar_datum(rval, function->result_in_func, function->result_elem, &isnull);
 		else
-			result = get_array_datum(rval, function, &isnull);
+			result = get_array_datum(rval, function, 0, &isnull);
 
 	}
 
@@ -655,6 +655,8 @@ get_tuplestore(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bool 
 
 	if (isFrame(rval))
 		nc = length(rval);
+	else if (isList(rval) || isNewList(rval))
+		nc = length(rval);
 	else if (isMatrix(rval))
 		nc = ncols(rval);
 	else
@@ -686,6 +688,8 @@ get_tuplestore(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bool 
 	rsinfo->returnMode = SFRM_Materialize;
 
 	if (isFrame(rval))
+		rsinfo->setResult = get_frame_tuplestore(rval, function, attinmeta, per_query_ctx, retset);
+	else if (isList(rval) || isNewList(rval))
 		rsinfo->setResult = get_frame_tuplestore(rval, function, attinmeta, per_query_ctx, retset);
 	else if (isMatrix(rval))
 		rsinfo->setResult = get_matrix_tuplestore(rval, function, attinmeta, per_query_ctx, retset);
@@ -744,7 +748,7 @@ get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem, bool *isnu
 }
 
 static Datum
-get_array_datum(SEXP rval, plr_function *function, bool *isnull)
+get_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 {
 	SEXP	rdims;
 	int		ndims;
@@ -754,9 +758,9 @@ get_array_datum(SEXP rval, plr_function *function, bool *isnull)
 	{
 		/* two supported special cases */
 		if (isFrame(rval))
-			return get_frame_array_datum(rval, function, isnull);
+			return get_frame_array_datum(rval, function,  col, isnull);
 		else if (isMatrix(rval))
-			return get_md_array_datum(rval, 2 /* matrix is 2D */, function, isnull);
+			return get_md_array_datum(rval, 2 /* matrix is 2D */, function, col, isnull);
 
 		PROTECT(rdims = getAttrib(rval, R_DimSymbol));
 		ndims = length(rdims);
@@ -764,10 +768,10 @@ get_array_datum(SEXP rval, plr_function *function, bool *isnull)
 
 		/* 2D and 3D arrays are specifically supported too */
 		if (ndims == 2 || ndims == 3)
-			return get_md_array_datum(rval, ndims, function, isnull);
+			return get_md_array_datum(rval, ndims, function, col, isnull);
 
 		/* everything else */
-		return get_generic_array_datum(rval, function, isnull);
+		return get_generic_array_datum(rval, function, col, isnull);
 	}
 	else
 	{
@@ -787,16 +791,16 @@ get_array_datum(SEXP rval, plr_function *function, bool *isnull)
 }
 
 static Datum
-get_frame_array_datum(SEXP rval, plr_function *function, bool *isnull)
+get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 {
 	Datum		dvalue;
 	SEXP		obj;
 	char	   *value;
-	Oid			result_elem = function->result_elem;
-	FmgrInfo	in_func = function->result_elem_in_func;
-	int			typlen = function->result_elem_typlen;
-	bool		typbyval = function->result_elem_typbyval;
-	char		typalign = function->result_elem_typalign;
+	Oid			result_elem;
+	FmgrInfo	in_func;
+	int			typlen;
+	bool		typbyval;
+	char		typalign;
 	int			i;
 	Datum	   *dvalues = NULL;
 	ArrayType  *array;
@@ -809,6 +813,23 @@ get_frame_array_datum(SEXP rval, plr_function *function, bool *isnull)
 	SEXP		dfcol = NULL;
 	int			j;
 
+	if (function->result_istuple)
+	{
+		result_elem = function->result_fld_elem_typid[col];
+		in_func = function->result_fld_elem_in_func[col];
+		typlen = function->result_fld_elem_typlen[col];
+		typbyval = function->result_fld_elem_typbyval[col];
+		typalign = function->result_fld_elem_typalign[col];
+	}
+	else
+	{
+		result_elem = function->result_elem;
+		in_func = function->result_elem_in_func;
+		typlen = function->result_elem_typlen;
+		typbyval = function->result_elem_typbyval;
+		typalign = function->result_elem_typalign;
+	}
+	
 	for (j = 0; j < nc; j++)
 	{
 		if (TYPEOF(rval) == VECSXP)
@@ -865,17 +886,17 @@ get_frame_array_datum(SEXP rval, plr_function *function, bool *isnull)
 }
 
 static Datum
-get_md_array_datum(SEXP rval, int ndims, plr_function *function, bool *isnull)
+get_md_array_datum(SEXP rval, int ndims, plr_function *function, int col, bool *isnull)
 {
 	Datum		dvalue;
 	SEXP		obj;
 	SEXP		rdims;
 	char	   *value;
-	Oid			result_elem = function->result_elem;
-	FmgrInfo	in_func = function->result_elem_in_func;
-	int			typlen = function->result_elem_typlen;
-	bool		typbyval = function->result_elem_typbyval;
-	char		typalign = function->result_elem_typalign;
+	Oid			result_elem;
+	FmgrInfo	in_func;
+	int			typlen;
+	bool		typbyval;
+	char		typalign;
 	int			i, j, k;
 	Datum	   *dvalues = NULL;
 	ArrayType  *array;
@@ -887,6 +908,23 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, bool *isnull)
 	int			lbs[ndims];
 	int			idx;
 	int			cntr = 0;
+
+	if (function->result_istuple)
+	{
+		result_elem = function->result_fld_elem_typid[col];
+		in_func = function->result_fld_elem_in_func[col];
+		typlen = function->result_fld_elem_typlen[col];
+		typbyval = function->result_fld_elem_typbyval[col];
+		typalign = function->result_fld_elem_typalign[col];
+	}
+	else
+	{
+		result_elem = function->result_elem;
+		in_func = function->result_elem_in_func;
+		typlen = function->result_elem_typlen;
+		typbyval = function->result_elem_typbyval;
+		typalign = function->result_elem_typalign;
+	}
 
 	PROTECT(rdims = getAttrib(rval, R_DimSymbol));
 	for(i = 0; i < ndims; i++)
@@ -952,24 +990,41 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, bool *isnull)
 }
 
 static Datum
-get_generic_array_datum(SEXP rval, plr_function *function, bool *isnull)
+get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 {
 	int			objlen = length(rval);
 	Datum		dvalue;
 	SEXP		obj;
 	char	   *value;
-	Oid			result_elem = function->result_elem;
-	FmgrInfo	in_func = function->result_elem_in_func;
-	int			typlen = function->result_elem_typlen;
-	bool		typbyval = function->result_elem_typbyval;
-	char		typalign = function->result_elem_typalign;
+	Oid			result_elem;
+	FmgrInfo	in_func;
+	int			typlen;
+	bool		typbyval;
+	char		typalign;
 	int			i;
 	Datum	   *dvalues = NULL;
 	ArrayType  *array;
 	int			ndims = 1;
 	int			dims[ndims];
 	int			lbs[ndims];
-
+	
+	if (function->result_istuple)
+	{
+		result_elem = function->result_fld_elem_typid[col];
+		in_func = function->result_fld_elem_in_func[col];
+		typlen = function->result_fld_elem_typlen[col];
+		typbyval = function->result_fld_elem_typbyval[col];
+		typalign = function->result_fld_elem_typalign[col];
+	}
+	else
+	{
+		result_elem = function->result_elem;
+		in_func = function->result_elem_in_func;
+		typlen = function->result_elem_typlen;
+		typbyval = function->result_elem_typbyval;
+		typalign = function->result_elem_typalign;
+	}
+	
 	dvalues = (Datum *) palloc(objlen * sizeof(Datum));
 	PROTECT(obj =  AS_CHARACTER(rval));
 
@@ -1011,6 +1066,9 @@ get_frame_tuplestore(SEXP rval,
 	Tuplestorestate	   *tupstore;
 	char			  **values;
 	HeapTuple			tuple;
+	TupleDesc			tupdesc = attinmeta->tupdesc;
+	int					tupdesc_nc = tupdesc->natts;
+	Form_pg_attribute  *attrs = tupdesc->attrs;
 	MemoryContext		oldcontext;
 	int					i, j;
 	int					nr = 0;
@@ -1018,6 +1076,13 @@ get_frame_tuplestore(SEXP rval,
 	SEXP				dfcol;
 	SEXP				result;
 
+	if (nc != tupdesc_nc)
+		ereport(ERROR,
+		(errcode(ERRCODE_DATA_EXCEPTION),
+			errmsg("actual and requested return type mismatch"),
+			errdetail("Actual return type has %d columns, but " \
+					  "requested return type has %d", nc, tupdesc_nc)));
+		
 	/* switch to appropriate context to create the tuple store */
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
 
@@ -1032,9 +1097,14 @@ get_frame_tuplestore(SEXP rval,
 	 */
 	if (retset)
 	{
-		PROTECT(dfcol = VECTOR_ELT(rval, 0));
-		nr = length(dfcol);
-		UNPROTECT(1);
+		if (isFrame(rval))
+		{
+			PROTECT(dfcol = VECTOR_ELT(rval, 0));
+			nr = length(dfcol);
+			UNPROTECT(1);
+		}
+		else if (isList(rval) || isNewList(rval))
+			nr = 1;
 	}
 	else
 		nr = 1;
@@ -1100,7 +1170,40 @@ get_frame_tuplestore(SEXP rval,
 			else
 			{
 				if (STRING_ELT(dfcol, i) != NA_STRING)
-					values[j] = pstrdup(CHAR(STRING_ELT(dfcol, i)));
+				{
+					if (attrs[j]->attndims == 0)
+						values[j] = pstrdup(CHAR(STRING_ELT(dfcol, i)));
+					else
+					{
+						bool	isnull = false;
+						Datum	arr_datum;
+						
+						arr_datum = get_array_datum(dfcol, function, j, &isnull);
+						if (isnull)
+							values[j] = NULL;
+						else
+						{
+							FunctionCallInfoData	fake_fcinfo;
+							FmgrInfo				flinfo;
+							Datum					dvalue;
+							
+							MemSet(&fake_fcinfo, 0, sizeof(fake_fcinfo));
+							fake_fcinfo.flinfo = &flinfo;
+							flinfo.fn_mcxt = CurrentMemoryContext;
+							fake_fcinfo.context = NULL;
+							fake_fcinfo.resultinfo = NULL;
+							fake_fcinfo.isnull = false;
+							fake_fcinfo.nargs = 1;
+							fake_fcinfo.arg[0] = arr_datum;
+							fake_fcinfo.argnull[0] = false;
+							dvalue = (*array_out)(&fake_fcinfo);
+							if (fake_fcinfo.isnull)
+								values[j] = NULL;
+							else
+								values[j] = DatumGetCString(dvalue);
+						}
+					}
+				}
 				else
 					values[j] = NULL;
 			}
@@ -1123,7 +1226,8 @@ get_frame_tuplestore(SEXP rval,
 		for (j = 0; j < nc; j++)
 			if (values[j] != NULL)
 				pfree(values[j]);
-    }
+	}
+	UNPROTECT(1);
 
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
 	tuplestore_donestoring(tupstore);

@@ -875,41 +875,95 @@ do_compile(FunctionCallInfo fcinfo,
 
 		perm_fmgr_info(typeStruct->typinput, &(function->result_in_func));
 
-		/*
-		 * Is return type an array? get_element_type will return InvalidOid
-		 * instead of actual element type if the type is not a varlena array.
-		 */
-		if (OidIsValid(get_element_type(function->result_typid)))
-			function->result_elem = typeStruct->typelem;
-		else	/* not an array */
-			function->result_elem = InvalidOid;
-
-		ReleaseSysCache(typeTup);
-
-		/*
-		 * if we have an array type, get the element type's in_func
-		 */
-		if (function->result_elem != InvalidOid)
+		if (function->result_istuple)
 		{
-			int16		typlen;
-			bool		typbyval;
-			char		typdelim;
-			Oid			typinput,
-						typelem;
-			FmgrInfo	inputproc;
-			char		typalign;
+			int16			typlen;
+			bool			typbyval;
+			char			typdelim;
+			Oid				typinput,
+							typelem;
+			FmgrInfo		inputproc;
+			char			typalign;
+			TupleDesc		tupdesc;
+			int				i;
+			ReturnSetInfo  *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+			
+			/* check to see if caller supports us returning a tuplestore */
+			if (!rsinfo || !(rsinfo->allowedModes & SFRM_Materialize))
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+				 		errmsg("materialize mode required, but it is not "
+								"allowed in this context")));
 
-			get_type_io_data(function->result_elem, IOFunc_input,
-									 &typlen, &typbyval, &typalign,
-									 &typdelim, &typelem, &typinput);
-
-			perm_fmgr_info(typinput, &inputproc);
-
-			function->result_elem_in_func = inputproc;
-			function->result_elem_typbyval = typbyval;
-			function->result_elem_typlen = typlen;
-			function->result_elem_typalign = typalign;
+			tupdesc = rsinfo->expectedDesc;
+			function->result_natts = tupdesc->natts;
+			
+			function->result_fld_elem_typid = (Oid *)
+											palloc0(function->result_natts * sizeof(Oid));
+			function->result_fld_elem_in_func = (FmgrInfo *)
+											palloc0(function->result_natts * sizeof(FmgrInfo));
+			function->result_fld_elem_typlen = (int *)
+											palloc0(function->result_natts * sizeof(int));
+			function->result_fld_elem_typbyval = (bool *)
+											palloc0(function->result_natts * sizeof(bool));
+			function->result_fld_elem_typalign = (char *)
+											palloc0(function->result_natts * sizeof(char));
+	
+			for (i = 0; i < function->result_natts; i++)
+			{
+				function->result_fld_elem_typid[i] = get_element_type(tupdesc->attrs[i]->atttypid);
+				if (OidIsValid(function->result_fld_elem_typid[i]))
+				{
+					get_type_io_data(function->result_fld_elem_typid[i], IOFunc_input,
+										&typlen, &typbyval, &typalign,
+										&typdelim, &typelem, &typinput);
+		
+					perm_fmgr_info(typinput, &inputproc);
+		
+					function->result_fld_elem_in_func[i] = inputproc;
+					function->result_fld_elem_typbyval[i] = typbyval;
+					function->result_fld_elem_typlen[i] = typlen;
+					function->result_fld_elem_typalign[i] = typalign;
+				}
+			}
 		}
+		else
+		{
+			/*
+			 * Is return type an array? get_element_type will return InvalidOid
+			 * instead of actual element type if the type is not a varlena array.
+			 */
+			if (OidIsValid(get_element_type(function->result_typid)))
+				function->result_elem = typeStruct->typelem;
+			else	/* not an array */
+				function->result_elem = InvalidOid;
+			
+			/*
+			* if we have an array type, get the element type's in_func
+			*/
+			if (function->result_elem != InvalidOid)
+			{
+				int16		typlen;
+				bool		typbyval;
+				char		typdelim;
+				Oid			typinput,
+							typelem;
+				FmgrInfo	inputproc;
+				char		typalign;
+	
+				get_type_io_data(function->result_elem, IOFunc_input,
+										&typlen, &typbyval, &typalign,
+										&typdelim, &typelem, &typinput);
+	
+				perm_fmgr_info(typinput, &inputproc);
+	
+				function->result_elem_in_func = inputproc;
+				function->result_elem_typbyval = typbyval;
+				function->result_elem_typlen = typlen;
+				function->result_elem_typalign = typalign;
+			}
+		}
+		ReleaseSysCache(typeTup);
 	}
 	else /* trigger */
 	{

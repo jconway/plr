@@ -372,6 +372,17 @@ typedef enum IOFuncSelector
 		if (argnames) \
 			pfree(argnames); \
 	} while (0)
+#define PREPARE_PG_TRY
+#define PLR_PG_CATCH() \
+		PG_CATCH(); \
+		{ \
+			ErrorData  *edata; \
+			MemoryContextSwitchTo(plr_SPI_context); \
+			edata = CopyErrorData(); \
+			error("error in SQL statement : %s", edata->message); \
+		}
+#define PLR_PG_END_TRY() \
+	PG_END_TRY()
 #else
 /*************************************************************************
  * working with earlier than postgres 7.5 compatible sources
@@ -425,6 +436,21 @@ typedef enum IOFuncSelector
 		appendStringInfo(proc_internal_args, "arg%d", i + 1); \
 	} while (0)
 #define FREE_ARG_NAMES
+#define PREPARE_PG_TRY \
+	sigjmp_buf		save_restart
+#define PG_TRY()  \
+	do { \
+		memcpy(&save_restart, &Warn_restart, sizeof(save_restart)); \
+		if (sigsetjmp(Warn_restart, 1) != 0) \
+		{ \
+			InError = false; \
+			memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart)); \
+			error("%s", "error in SQL statement"); \
+		} \
+	} while (0)
+#define PLR_PG_CATCH()
+#define PLR_PG_END_TRY() \
+	memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart))
 #endif /* PG_VERSION_75_COMPAT */
 
 /*
@@ -468,6 +494,12 @@ typedef struct plr_function
 	int					result_elem_typlen;
 	bool				result_elem_typbyval;
 	char				result_elem_typalign;
+	int					result_natts;
+	Oid				   *result_fld_elem_typid;
+	FmgrInfo		   *result_fld_elem_in_func;
+	int				   *result_fld_elem_typlen;
+	bool			   *result_fld_elem_typbyval;
+	char			   *result_fld_elem_typalign;
 	int					nargs;
 	Oid					arg_typid[FUNC_MAX_ARGS];
 	FmgrInfo			arg_out_func[FUNC_MAX_ARGS];

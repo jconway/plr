@@ -127,14 +127,14 @@ plr_quote_ident(SEXP rval)
 SEXP
 plr_SPI_exec(SEXP rsql)
 {
-	int				spi_rc;
+	int				spi_rc = 0;
 	char			buf[64];
 	char		   *sql;
 	int				count = 0;
 	int				ntuples;
 	SEXP			result = NULL;
 	MemoryContext	oldcontext;
-	sigjmp_buf		save_restart;
+	PREPARE_PG_TRY;
 	ERRORCONTEXTCALLBACK;
 
 	/* set up error context */
@@ -152,17 +152,14 @@ plr_SPI_exec(SEXP rsql)
 	 * trap elog/ereport so we can let R finish up gracefully
 	 * and generate the error once we exit the interpreter
 	 */
-	memcpy(&save_restart, &Warn_restart, sizeof(save_restart));
-	if (sigsetjmp(Warn_restart, 1) != 0)
+	PG_TRY();
 	{
-		InError = false;
-		memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-		error("%s", "error executing SQL statement");
+		/* Execute the query and handle return codes */
+		spi_rc = SPI_exec(sql, count);
 	}
-
-	/* Execute the query and handle return codes */
-	spi_rc = SPI_exec(sql, count);
-
+	PLR_PG_CATCH();
+	PLR_PG_END_TRY();
+	
 	/* back to caller's memory context */
 	MemoryContextSwitchTo(oldcontext);
 
@@ -175,12 +172,8 @@ plr_SPI_exec(SEXP rsql)
 			PROTECT(result = NEW_CHARACTER(1));
 			SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(buf));
 			UNPROTECT(1);
-
-			/* restore normal error handling */
-			memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-
-			return result;
-
+			break;
+			
 		case SPI_OK_SELINTO:
 		case SPI_OK_INSERT:
 		case SPI_OK_DELETE:
@@ -191,55 +184,49 @@ plr_SPI_exec(SEXP rsql)
 			PROTECT(result = NEW_CHARACTER(1));
 			SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(buf));
 			UNPROTECT(1);
-
-			/* restore normal error handling */
-			memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-
-			return result;
-
-		case SPI_OK_SELECT:
 			break;
-
+			
+		case SPI_OK_SELECT:
+			ntuples = SPI_processed;
+			if (ntuples > 0)
+			{
+				result = rpgsql_get_results(ntuples, SPI_tuptable);
+				SPI_freetuptable(SPI_tuptable);
+			}
+			else
+				result = R_NilValue;
+			break;
+			
 		case SPI_ERROR_ARGUMENT:
 			error("SPI_exec() failed: SPI_ERROR_ARGUMENT");
-
+			break;
+			
 		case SPI_ERROR_UNCONNECTED:
 			error("SPI_exec() failed: SPI_ERROR_UNCONNECTED");
-
+			break;
+			
 		case SPI_ERROR_COPY:
 			error("SPI_exec() failed: SPI_ERROR_COPY");
-
+			break;
+			
 		case SPI_ERROR_CURSOR:
 			error("SPI_exec() failed: SPI_ERROR_CURSOR");
-
+			break;
+			
 		case SPI_ERROR_TRANSACTION:
 			error("SPI_exec() failed: SPI_ERROR_TRANSACTION");
-
+			break;
+			
 		case SPI_ERROR_OPUNKNOWN:
 			error("SPI_exec() failed: SPI_ERROR_OPUNKNOWN");
-
+			break;
+			
 		default:
 			error("SPI_exec() failed: %d", spi_rc);
+			break;
 	}
-
-	/*
-	 * Only SELECT queries fall through to here - remember the
-	 * tuples we got
-	 */
-	ntuples = SPI_processed;
-	if (ntuples > 0)
-	{
-		result = rpgsql_get_results(ntuples, SPI_tuptable);
-		SPI_freetuptable(SPI_tuptable);
-	}
-	else
-		result = R_NilValue;
-
+			
 	POP_PLERRCONTEXT;
-
-	/* restore normal error handling */
-	memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-
 	return result;
 }
 
@@ -279,12 +266,12 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	Oid				   *typeids = NULL;
 	Oid				   *typelems = NULL;
 	FmgrInfo		   *typinfuncs = NULL;
-	void			   *pplan;
+	void			   *pplan = NULL;
 	void			   *saved_plan;
 	saved_plan_desc	   *plan_desc;
 	SEXP				result;
 	MemoryContext		oldcontext;
-	sigjmp_buf			save_restart;
+	PREPARE_PG_TRY;
 	ERRORCONTEXTCALLBACK;
 
 	/* set up error context */
@@ -362,17 +349,14 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	 * trap elog/ereport so we can let R finish up gracefully
 	 * and generate the error once we exit the interpreter
 	 */
-	memcpy(&save_restart, &Warn_restart, sizeof(save_restart));
-	if (sigsetjmp(Warn_restart, 1) != 0)
+	PG_TRY();
 	{
-		InError = false;
-		memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-		error("%s", "error preparing SQL statement");
+		/* Prepare plan for query */
+		pplan = SPI_prepare(sql, nargs, typeids);
 	}
-
-	/* Prepare plan for query */
-	pplan = SPI_prepare(sql, nargs, typeids);
-
+	PLR_PG_CATCH();
+	PLR_PG_END_TRY();
+	
 	UNPROTECT(2);
 
 	if (pplan == NULL)
@@ -410,7 +394,6 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 				snprintf(buf, sizeof(buf), "unknown RC %d", SPI_result);
 				reason = buf;
 				break;
-
 		}
 
 		/* internal error */
@@ -438,7 +421,6 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 				snprintf(buf, sizeof(buf), "unknown RC %d", SPI_result);
 				reason = buf;
 				break;
-
 		}
 
 		/* internal error */
@@ -460,10 +442,6 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	result = R_MakeExternalPtr(plan_desc, R_NilValue, R_NilValue);
 
 	POP_PLERRCONTEXT;
-
-	/* restore normal error handling */
-	memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-
 	return result;
 }
 
@@ -483,13 +461,13 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	char			   *nulls = NULL;
 	bool				isnull = false;
 	SEXP				obj;
-	int					spi_rc;
+	int					spi_rc = 0;
 	char				buf[64];
 	int					count = 0;
 	int					ntuples;
-	SEXP				result;
+	SEXP				result = NULL;
 	MemoryContext		oldcontext;
-	sigjmp_buf			save_restart;
+	PREPARE_PG_TRY;
 	ERRORCONTEXTCALLBACK;
 
 	/* set up error context */
@@ -530,16 +508,13 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	 * trap elog/ereport so we can let R finish up gracefully
 	 * and generate the error once we exit the interpreter
 	 */
-	memcpy(&save_restart, &Warn_restart, sizeof(save_restart));
-	if (sigsetjmp(Warn_restart, 1) != 0)
+	PG_TRY();
 	{
-		InError = false;
-		memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-		error("%s", "error executing saved plan");
+		/* Execute the plan */
+		spi_rc = SPI_execp(saved_plan, argvalues, nulls, count);
 	}
-
-	/* Execute the plan */
-	spi_rc = SPI_execp(saved_plan, argvalues, nulls, count);
+	PLR_PG_CATCH();
+	PLR_PG_END_TRY();
 
 	/* back to caller's memory context */
 	MemoryContextSwitchTo(oldcontext);
@@ -555,11 +530,8 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 			SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(buf));
 			UNPROTECT(1);
 
-			/* restore normal error handling */
-			memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-
-			return result;
-
+			break;
+			
 		case SPI_OK_SELINTO:
 		case SPI_OK_INSERT:
 		case SPI_OK_DELETE:
@@ -571,54 +543,49 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 			SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(buf));
 			UNPROTECT(1);
 
-			/* restore normal error handling */
-			memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-
-			return result;
-
-		case SPI_OK_SELECT:
 			break;
-
+			
+		case SPI_OK_SELECT:
+			ntuples = SPI_processed;
+			if (ntuples > 0)
+			{
+				result = rpgsql_get_results(ntuples, SPI_tuptable);
+				SPI_freetuptable(SPI_tuptable);
+			}
+			else
+				result = R_NilValue;
+			break;
+			
 		case SPI_ERROR_ARGUMENT:
 			error("SPI_execp() failed: SPI_ERROR_ARGUMENT");
-
+			break;
+			
 		case SPI_ERROR_UNCONNECTED:
 			error("SPI_execp() failed: SPI_ERROR_UNCONNECTED");
-
+			break;
+			
 		case SPI_ERROR_COPY:
 			error("SPI_execp() failed: SPI_ERROR_COPY");
-
+			break;
+			
 		case SPI_ERROR_CURSOR:
 			error("SPI_execp() failed: SPI_ERROR_CURSOR");
-
+			break;
+			
 		case SPI_ERROR_TRANSACTION:
 			error("SPI_execp() failed: SPI_ERROR_TRANSACTION");
-
+			break;
+			
 		case SPI_ERROR_OPUNKNOWN:
 			error("SPI_execp() failed: SPI_ERROR_OPUNKNOWN");
-
+			break;
+			
 		default:
 			error("SPI_execp() failed: %d", spi_rc);
+			break;
 	}
-
-	/*
-	 * Only SELECT queries fall through to here - remember the
-	 * tuples we got
-	 */
-	ntuples = SPI_processed;
-	if (ntuples > 0)
-	{
-		result = rpgsql_get_results(ntuples, SPI_tuptable);
-		SPI_freetuptable(SPI_tuptable);
-	}
-	else
-		result = R_NilValue;
 
 	POP_PLERRCONTEXT;
-
-	/* restore normal error handling */
-	memcpy(&Warn_restart, &save_restart, sizeof(Warn_restart));
-
 	return result;
 }
 
