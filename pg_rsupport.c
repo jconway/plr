@@ -198,7 +198,6 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 		SEXP			result;
 		char		   *value;
 
-
 		/*
 		 * Allocate the data.frame initially as a list,
 		 * and also allocate a names vector for the column names
@@ -214,12 +213,12 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 			/*
 			 * Set column name
 			 */
-			SET_STRING_ELT(names, j,  mkChar(SPI_fname(tupdesc, j)));
+			SET_STRING_ELT(names, j,  mkChar(SPI_fname(tupdesc, j + 1)));
 
 			/*
 			 * Loop rows, setting vector datatype based on pgsql datatype
 			 */
-			switch (SPI_gettypeid(tupdesc, j))
+			switch (SPI_gettypeid(tupdesc, j + 1))
 			{
 				case INT2OID:
 				case INT4OID:
@@ -230,7 +229,7 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 
 					for (i = 0; i < nr; i++)
 					{
-						if ((value = SPI_getvalue(tuples[i], tupdesc, j)))
+						if ((value = SPI_getvalue(tuples[i], tupdesc, j + 1)))
 							INTEGER(fldvec)[i] = atoi(value);
 						else
 							SET_STRING_ELT(fldvec, i, NA_STRING);
@@ -250,7 +249,7 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 
 					for (i = 0; i < nr; i++)
 					{
-						if ((value = SPI_getvalue(tuples[i], tupdesc, j)))
+						if ((value = SPI_getvalue(tuples[i], tupdesc, j + 1)))
 							REAL(fldvec)[i] = atof(value);
 						else
 							SET_STRING_ELT(fldvec, i, NA_STRING);
@@ -262,7 +261,7 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 
 					for (i = 0; i < nr; i++)
 					{
-						if ((value = SPI_getvalue(tuples[i], tupdesc, j)))
+						if ((value = SPI_getvalue(tuples[i], tupdesc, j + 1)))
 							LOGICAL(fldvec)[i] = ((*value == 't') ? 1 : 0);
 						else
 							SET_STRING_ELT(fldvec, i, NA_STRING);
@@ -281,7 +280,7 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 
 					for (i = 0; i < nr; i++)
 					{
-						if ((value = SPI_getvalue(tuples[i], tupdesc, j)))
+						if ((value = SPI_getvalue(tuples[i], tupdesc, j + 1)))
 							SET_STRING_ELT(fldvec, i, mkChar(value));
 						else
 							SET_STRING_ELT(fldvec, i, NA_STRING);
