@@ -37,6 +37,7 @@
  */
 MemoryContext plr_SPI_context;
 HTAB *plr_HashTable = (HTAB *) NULL;
+char *last_R_error_msg = NULL;
 
 static bool plr_firstcall = true;
 static bool	plr_interp_started = false;
@@ -182,7 +183,10 @@ load_r_cmd(const char *cmd)
 	PROTECT(cmdexpr = R_ParseVector(cmdSexp, -1, &status));
 	if (status != PARSE_OK) {
 	    UNPROTECT(2);
-	    elog(ERROR, "plr: invalid R call: %s", cmd);
+		if (last_R_error_msg)
+			elog(ERROR, "%s", last_R_error_msg);
+		else
+			elog(ERROR, "R parse error: %s", cmd);
 	}
 
 	/* Loop is needed here as EXPSEXP may be of length > 1 */
@@ -190,7 +194,12 @@ load_r_cmd(const char *cmd)
 	{
 		ans = R_tryEval(VECTOR_ELT(cmdexpr, i), R_GlobalEnv, &status);
 		if(status != 0)
-			elog(ERROR, "Caught an error calling R function");
+		{
+			if (last_R_error_msg)
+				elog(ERROR, "%s", last_R_error_msg);
+			else
+				elog(ERROR, "%s", "caught error calling R function");
+		}
 	}
 
 	UNPROTECT(2);
@@ -836,7 +845,10 @@ plr_parse_func_body(const char *body)
 	if (status != PARSE_OK)
 	{
 	    UNPROTECT(2);
-		elog(ERROR, "plr: R parse error");
+		if (last_R_error_msg)
+			elog(ERROR, "%s", last_R_error_msg);
+		else
+			elog(ERROR, "R parse error in function body");
 	}
 
 	UNPROTECT(2);
@@ -875,8 +887,12 @@ call_r_func(SEXP fun, SEXP rargs)
 	UNPROTECT(1);
 
 	if(errorOccurred)
-		elog(ERROR, "Caught an error calling R function");
-
+	{
+		if (last_R_error_msg)
+			elog(ERROR, "%s", last_R_error_msg);
+		else
+			elog(ERROR, "%s", "caught error calling R function");
+	}
 	return ans;
 }
 

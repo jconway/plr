@@ -33,6 +33,7 @@
 #include "plr.h"
 
 extern MemoryContext plr_SPI_context;
+extern char *last_R_error_msg;
 
 static SEXP rpgsql_get_results(int ntuples, SPITupleTable *tuptable);
 
@@ -593,29 +594,19 @@ plr_SPI_lastoid(void)
 	return result;
 }
 
-#ifdef PG_VERSION_73_COMPAT
-/*************************************************************************
- * working with postgres 7.3 compatible sources
- *************************************************************************/
-void
-throw_r_error(const char **msg)
-{
-	throw_pg_notice(msg);
-}
-
-#else
-/*************************************************************************
- * working with postgres 7.4 compatible sources
- *************************************************************************/
-
 void
 throw_r_error(const char **msg)
 {
 	if (msg && *msg)
-		elog(ERROR, "%s", *msg);
+		last_R_error_msg = pstrdup(*msg);
 	else
-		elog(ERROR, "%s", "");
+		last_R_error_msg = pstrdup("caught error calling R function");
 }
+
+#ifndef PG_VERSION_73_COMPAT
+/*************************************************************************
+ * working with postgres 7.4 compatible sources
+ *************************************************************************/
 
 /*
  * error context callback to let us supply a call-stack traceback
