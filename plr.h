@@ -285,12 +285,12 @@ typedef enum IOFuncSelector
 #define PROARGTYPES(i) \
 		procStruct->proargtypes.values[i]
 #define FUNCARGTYPES(_tup_) \
-		funcargtypes = ((Form_pg_proc) GETSTRUCT(_tup_))->proargtypes.values
+		((Form_pg_proc) GETSTRUCT(_tup_))->proargtypes.values
 #else  /* 8.0 or less */
 #define PROARGTYPES(i) \
 		procStruct->proargtypes[i]
 #define FUNCARGTYPES(_tup_) \
-		funcargtypes = ((Form_pg_proc) GETSTRUCT(_tup_))->proargtypes
+		((Form_pg_proc) GETSTRUCT(_tup_))->proargtypes
 #endif /* PG_VERSION_81_COMPAT */
 
 #if defined(PG_VERSION_80_COMPAT) || defined(PG_VERSION_81_COMPAT)

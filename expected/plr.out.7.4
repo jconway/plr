@@ -165,7 +165,7 @@ select sprintf('%s is %s feet tall', 'Sven', '7');
 --
 -- test aggregates
 --
-create table foo(f0 int, f1 text, f2 float8);
+create table foo(f0 int, f1 text, f2 float8) with oids;
 insert into foo values(1,'cat1',1.21);
 insert into foo values(2,'cat1',1.24);
 insert into foo values(3,'cat1',1.18);
