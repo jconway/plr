@@ -228,7 +228,7 @@ load_r_cmd(const char *cmd)
  * callback
  */
 void
-plr_cleanup(void)
+PLR_CLEANUP
 {
 	char   *buf;
 	char   *tmpdir = getenv("R_SESSION_TMPDIR");

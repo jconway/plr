@@ -78,8 +78,12 @@
 #include "utils/elog.h"
 
 /* working with postgres 7.3 compatible sources */
-#if (CATALOG_VERSION_NO < 200303091)
+#if (CATALOG_VERSION_NO <= 200211021)
 #define PG_VERSION_73_COMPAT
+#elif (CATALOG_VERSION_NO <= 200310211)
+#define PG_VERSION_74_COMPAT
+#else
+#define PG_VERSION_75_COMPAT
 #endif
 
 #ifdef DEBUGPROTECT
@@ -245,6 +249,18 @@ typedef enum IOFuncSelector
 
 #endif /* PG_VERSION_73_COMPAT */
 
+#ifndef PG_VERSION_75_COMPAT
+
+#define  PLR_CLEANUP \
+	plr_cleanup(void)
+
+#else
+
+#define  PLR_CLEANUP \
+	plr_cleanup(int code, Datum arg)
+
+#endif /* not PG_VERSION_75_COMPAT */
+
 /*
  * structs
  */
@@ -314,7 +330,7 @@ extern int Rf_initEmbeddedR(int argc, char **argv);
 
 /* PL/R language handler */
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
-extern void plr_cleanup(void);
+extern void PLR_CLEANUP;
 extern void plr_init(void);
 extern void plr_load_modules(MemoryContext plr_SPI_context);
 extern void load_r_cmd(const char *cmd);
