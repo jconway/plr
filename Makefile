@@ -15,6 +15,7 @@ shared_libr = yes
 endif
 
 override CPPFLAGS := -I$(srcdir) -I$(r_includespec) $(CPPFLAGS)
+override CPPFLAGS += -DPKGLIBDIR=\"$(pkglibdir)\" -DDLSUFFIX=\"$(DLSUFFIX)\"
 rpath :=
 
 MODULE_big = plr
@@ -24,5 +25,6 @@ SHLIB_LINK = -L$(r_libdir) -lR
 
 DATA_built = plr.sql 
 DOCS = README.plr
+REGRESS = plr
 
 include $(top_srcdir)/contrib/contrib-global.mk

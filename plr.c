@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <setjmp.h>
+#include <sys/stat.h>
 
 #define ELOG_H
 
@@ -53,6 +54,11 @@
 #undef ELOG_H
 #include "utils/elog.h"
 
+/* Example format: "/usr/local/pgsql/lib" */
+#ifndef PKGLIBDIR
+#error "PKGLIBDIR needs to be defined to compile this file."
+#endif
+
 /*
  * Global data
  */
@@ -65,6 +71,7 @@ static int	plr_restart_in_progress = 0;
 /*
  * defines
  */
+#define PLR_LIB_PATH		"/usr/local/pgsql/lib/plr.so"
 #define MAX_PRONAME_LEN		64
 #define FUNCS_PER_USER		64
 
@@ -189,8 +196,12 @@ typedef struct plr_hashent
  * static declarations
  */
 static void perm_fmgr_info(Oid functionId, FmgrInfo *finfo);
-static void plr_init_interp(void);
-static void plr_init_all(void);
+static char *get_lib_pathstr(Oid funcid);
+static char *get_load_self_ref_cmd(Oid funcid);
+static void load_r_cmd(const char *cmd);
+static void plr_init_interp(Oid funcid);
+static void plr_init_all(Oid funcid);
+static void plr_init_load_modules(void);
 static HeapTuple plr_trigger_handler(PG_FUNCTION_ARGS);
 static Datum plr_func_handler(PG_FUNCTION_ARGS);
 static plr_proc_desc *compile_plr_function(Oid fn_oid, bool is_trigger);
@@ -207,13 +218,23 @@ static void system_cache_lookup(Oid element_type, bool input, int *typlen,
 					bool *typbyval, char *typdelim, Oid *typelem,
 					Oid *proc, char *typalign);
 static ArrayType *array_create(FunctionCallInfo fcinfo, int numelems, int elem_start);
+static char *expand_dynamic_library_name(const char *name);
+static char *substitute_libpath_macro(const char *name);
+static char *find_in_dynamic_libpath(const char *basename);
+static bool file_exists(const char *name);
 
 /*
  * external declarations
  */
+extern char *Dynamic_library_path;
+
 extern int Rf_initEmbeddedR(int argc, char **argv);
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
+
 extern void throw_pg_error(const char **msg);
+extern SEXP plr_quote_literal(SEXP rawstr);
+extern SEXP plr_quote_ident(SEXP rawstr);
+
 extern Datum array_push(PG_FUNCTION_ARGS);
 extern Datum array(PG_FUNCTION_ARGS);
 extern Datum array_accum(PG_FUNCTION_ARGS);
@@ -245,7 +266,7 @@ plr_call_handler(PG_FUNCTION_ARGS)
 
 	/* initialize R if needed */
 	if(plr_firstcall)
-		plr_init_all();
+		plr_init_all(fcinfo->flinfo->fn_oid);
 
 	/* Connect to SPI manager */
 	if (SPI_connect() != SPI_OK_CONNECT)
@@ -296,34 +317,125 @@ perm_fmgr_info(Oid functionId, FmgrInfo *finfo)
 	finfo->fn_mcxt = QueryContext;
 }
 
+
+static char *
+get_lib_pathstr(Oid funcid)
+{
+	HeapTuple			procedureTuple;
+	Form_pg_proc		procedureStruct;
+	Oid					language;
+	HeapTuple			languageTuple;
+	Form_pg_language	languageStruct;
+	Oid					lang_funcid;
+	Datum				tmp;
+	bool				isnull;
+	char			   *raw_path;
+	char			   *cooked_path;
+
+	/* get the pg_proc entry */
+	procedureTuple = SearchSysCache(PROCOID,
+									ObjectIdGetDatum(funcid),
+									0, 0, 0);
+	if (!HeapTupleIsValid(procedureTuple))
+		elog(ERROR, "get_lib_pathstr: cache lookup for function %u failed",
+			 funcid);
+	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
+
+	/* now get the pg_language entry */
+	language = procedureStruct->prolang;
+	ReleaseSysCache(procedureTuple);
+
+	languageTuple = SearchSysCache(LANGOID,
+								   ObjectIdGetDatum(language),
+								   0, 0, 0);
+	if (!HeapTupleIsValid(languageTuple))
+		elog(ERROR, "get_lib_pathstr: cache lookup for language %u failed",
+			 language);
+	languageStruct = (Form_pg_language) GETSTRUCT(languageTuple);
+	lang_funcid = languageStruct->lanplcallfoid;
+	ReleaseSysCache(languageTuple);
+
+	/* finally, get the pg_proc entry for the language handler */
+	procedureTuple = SearchSysCache(PROCOID,
+									ObjectIdGetDatum(lang_funcid),
+									0, 0, 0);
+	if (!HeapTupleIsValid(procedureTuple))
+		elog(ERROR, "get_lib_pathstr: cache lookup for function %u failed",
+			 lang_funcid);
+	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
+
+	tmp = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_probin, &isnull);
+	raw_path = DatumGetCString(DirectFunctionCall1(byteaout, tmp));
+	cooked_path = expand_dynamic_library_name(raw_path);
+
+	ReleaseSysCache(procedureTuple);
+
+	return cooked_path;
+}
+
+static char *
+get_load_self_ref_cmd(Oid funcid)
+{
+	char   *libstr = get_lib_pathstr(funcid);
+	char   *buf = (char *) palloc(strlen(libstr) + 12 + 1);
+
+	sprintf(buf, "dyn.load(\"%s\")", libstr);
+	return buf;
+}
+
+
+static void
+load_r_cmd(const char *cmd)
+{
+	SEXP		cmdSexp,
+				cmdexpr,
+				ans = R_NilValue;
+	int			i,
+				status;
+
+	PROTECT(cmdSexp = NEW_CHARACTER(1));
+	SET_STRING_ELT(cmdSexp, 0, COPY_TO_USER_STRING(cmd));
+	PROTECT(cmdexpr = R_ParseVector(cmdSexp, -1, &status));
+	if (status != PARSE_OK) {
+	    UNPROTECT(2);
+	    error("plr: invalid R call: %s", cmd);
+	}
+	/* Loop is needed here as EXPSEXP may be of length > 1 */
+	for(i = 0; i < length(cmdexpr); i++)
+	    ans = eval(VECTOR_ELT(cmdexpr, i), R_GlobalEnv);
+	UNPROTECT(2);
+}
+
 /*
  * plr_init_interp() - initialize an R interpreter
  */
 static void
-plr_init_interp(void)
+plr_init_interp(Oid funcid)
 {
 	int			argc;
 	char	   *argv[] = {"PL/R", "--gui=none", "--silent", "--no-save"};
-	SEXP		cmdSexp,
-				cmdexpr,
-				ans = R_NilValue;
-	int			i, j,
-				status;
+	int			j;
 	char	   *cmd;
 	char	   *cmds[] =
 	{
 		/* first turn off error handling by R */
 		"options(error = expression(NULL))",
 
-		/* next load libplr; XXX - need non-hardcoded way to do this */
-		"dyn.load(\"/opt/src/pgsql/contrib/plr/libplr.so\")",
-
 		/* set up the postgres error handler in R */
-		"throw_pg_error <-function(msg) {.C(\"throw_pg_error\", as.character(msg))}",
+		"pg_throw_error <-function(msg) {.C(\"throw_pg_error\", as.character(msg))}",
+		"options(error = expression(pg_throw_error(geterrmessage())))",
 
-		/* now reset R to use the Postgres error handler */
-		"options(error = expression(throw_pg_error(geterrmessage())))",
-
+		/* install the commands for SPI support in the interpreter */
+		"pg_quote_literal <-function(sql) {.Call(\"plr_quote_literal\", sql)}",
+		"pg_quote_ident <-function(sql) {.Call(\"plr_quote_ident\", sql)}",
+/*
+		"pg_argisnull <-function(msg) {.C(\"argisnull\", as.character(msg))}",
+		"pg_return_null <-function(msg) {.C(\"return_null\", as.character(msg))}",
+		"pg_spi_exec <-function(msg) {.C(\"plr_spi_exec\", as.character(msg))}",
+		"pg_spi_prepare <-function(msg) {.C(\"plr_spi_prepare\", as.character(msg))}",
+		"pg_spi_execp <-function(msg) {.C(\"plr_spi_execp\", as.character(msg))}",
+		"pg_spi_lastoid <-function(msg) {.C(\"plr_spi_lastoid\", as.character(msg))}",
+*/
 		/* terminate */
 		NULL
 	};
@@ -332,28 +444,92 @@ plr_init_interp(void)
 	argc = sizeof(argv)/sizeof(argv[0]);
 	Rf_initEmbeddedR(argc, argv);
 
-	for (j = 0; (cmd = cmds[j]); j++)
+	/*
+	 * temporarily turn off R error reporting -- it will be turned back on
+	 * once the custom R error handler is installed from the plr library
+	 */
+	load_r_cmd(cmds[0]);
+
+	/* next load the plr library into R */
+	load_r_cmd(get_load_self_ref_cmd(funcid));
+
+	/*
+	 * run the rest of the R bootstrap commands, being careful to start
+	 * at cmds[1] since we already executed cmds[0]
+	 */
+	for (j = 1; (cmd = cmds[j]); j++)
+		load_r_cmd(cmds[j]);
+
+	/*
+	 * Try to load procedures from plr_modules
+	 */
+	if (SPI_connect() != SPI_OK_CONNECT)
+		elog(ERROR, "plr_init_interp: SPI_connect failed");
+	plr_init_load_modules();
+	if (SPI_finish() != SPI_OK_FINISH)
+		elog(ERROR, "plr_init_interp: SPI_finish failed");
+
+}
+
+/*
+ * plr_init_load_modules() - Load procedures from
+ *				  table plr_modules (if it exists)
+ */
+static void
+plr_init_load_modules(void)
+{
+	int			spi_rc;
+	char	   *cmd;
+	int			i;
+	int			fno;
+
+	/*
+	 * Check if table plr_modules exists
+	 */
+	spi_rc = SPI_exec("select 1 from pg_catalog.pg_class "
+					  "where relname = 'plr_modules'", 1);
+	SPI_freetuptable(SPI_tuptable);
+
+	if (spi_rc != SPI_OK_SELECT)
+		elog(ERROR, "plr_init_load_modules: select from pg_class failed");
+	if (SPI_processed == 0)
+		return;
+
+	/* Read all the row's from it in the order of modseq */
+	spi_rc = SPI_exec("select modseq, modsrc from plr_modules " \
+					  "order by modseq", 0);
+	if (spi_rc != SPI_OK_SELECT)
+		elog(ERROR, "plr_init_load_modules: select from plr_modules failed");
+
+	/* If there's nothing, no modules exist */
+	if (SPI_processed == 0)
 	{
-		PROTECT(cmdSexp = NEW_CHARACTER(1));
-		SET_STRING_ELT(cmdSexp, 0, COPY_TO_USER_STRING(cmd));
-		PROTECT(cmdexpr = R_ParseVector(cmdSexp, -1, &status));
-		if (status != PARSE_OK) {
-		    UNPROTECT(2);
-		    error("plr: invalid R call: %s", cmd);
-		}
-		/* Loop is needed here as EXPSEXP may be of length > 1 */
-		for(i = 0; i < length(cmdexpr); i++)
-		    ans = eval(VECTOR_ELT(cmdexpr, i), R_GlobalEnv);
-		UNPROTECT(2);
+		SPI_freetuptable(SPI_tuptable);
+		return;
 	}
 
-	/* now install the commands for SPI support */
+	/*
+	 * There is at least on module to load. Get the
+	 * source from the modsrc load it in the R interpreter
+	 */
+	fno = SPI_fnumber(SPI_tuptable->tupdesc, "modsrc");
 
-		/* FIXME - nothing currently */
+	for (i = 0; i < SPI_processed; i++)
+	{
+		cmd = SPI_getvalue(SPI_tuptable->vals[i],
+							SPI_tuptable->tupdesc, fno);
+
+		if (cmd != NULL)
+		{
+			load_r_cmd(cmd);
+			pfree(cmd);
+		}
+	}
+	SPI_freetuptable(SPI_tuptable);
 }
 
 static void
-plr_init_all(void)
+plr_init_all(Oid funcid)
 {
 	HASHCTL		ctl;
 
@@ -368,7 +544,7 @@ plr_init_all(void)
 	plr_HashTable = hash_create("plr hash", FUNCS_PER_USER, &ctl, HASH_ELEM);
 
 	/* now initialize EmbeddedR */
-	plr_init_interp();
+	plr_init_interp(funcid);
 
 	plr_firstcall = false;
 }
@@ -1164,21 +1340,263 @@ system_cache_lookup(Oid element_type,
 	ReleaseSysCache(typeTuple);
 }
 
+static bool
+file_exists(const char *name)
+{
+	struct stat st;
+
+	AssertArg(name != NULL);
+
+	if (stat(name, &st) == 0)
+		return S_ISDIR(st.st_mode) ? false : true;
+	else if (!(errno == ENOENT || errno == ENOTDIR || errno == EACCES))
+		elog(ERROR, "stat failed on %s: %s", name, strerror(errno));
+
+	return false;
+}
+
+/*
+ * If name contains a slash, check if the file exists, if so return
+ * the name.  Else (no slash) try to expand using search path (see
+ * find_in_dynamic_libpath below); if that works, return the fully
+ * expanded file name.	If the previous failed, append DLSUFFIX and
+ * try again.  If all fails, return NULL.
+ *
+ * A non-NULL result will always be freshly palloc'd.
+ */
+static char *
+expand_dynamic_library_name(const char *name)
+{
+	bool		have_slash;
+	char	   *new;
+	char	   *full;
+
+	AssertArg(name);
+
+	have_slash = (strchr(name, '/') != NULL);
+
+	if (!have_slash)
+	{
+		full = find_in_dynamic_libpath(name);
+		if (full)
+			return full;
+	}
+	else
+	{
+		full = substitute_libpath_macro(name);
+		if (file_exists(full))
+			return full;
+		pfree(full);
+	}
+
+	new = palloc(strlen(name) + strlen(DLSUFFIX) + 1);
+	strcpy(new, name);
+	strcat(new, DLSUFFIX);
+
+	if (!have_slash)
+	{
+		full = find_in_dynamic_libpath(new);
+		pfree(new);
+		if (full)
+			return full;
+	}
+	else
+	{
+		full = substitute_libpath_macro(new);
+		pfree(new);
+		if (file_exists(full))
+			return full;
+		pfree(full);
+	}
+
+	return NULL;
+}
+
+
+/*
+ * Substitute for any macros appearing in the given string.
+ * Result is always freshly palloc'd.
+ */
+static char *
+substitute_libpath_macro(const char *name)
+{
+	size_t		macroname_len;
+	char	   *replacement = NULL;
+
+	AssertArg(name != NULL);
+
+	if (name[0] != '$')
+		return pstrdup(name);
+
+	macroname_len = strcspn(name + 1, "/") + 1;
+
+	if (strncmp(name, "$libdir", macroname_len) == 0)
+		replacement = PKGLIBDIR;
+	else
+		elog(ERROR, "invalid macro name in dynamic library path");
+
+	if (name[macroname_len] == '\0')
+		return pstrdup(replacement);
+	else
+	{
+		char	   *new;
+
+		new = palloc(strlen(replacement) + (strlen(name) - macroname_len) + 1);
+
+		strcpy(new, replacement);
+		strcat(new, name + macroname_len);
+
+		return new;
+	}
+}
+
+
+/*
+ * Search for a file called 'basename' in the colon-separated search
+ * path Dynamic_library_path.  If the file is found, the full file name
+ * is returned in freshly palloc'd memory.  If the file is not found,
+ * return NULL.
+ */
+static char *
+find_in_dynamic_libpath(const char *basename)
+{
+	const char *p;
+	size_t		baselen;
+
+	AssertArg(basename != NULL);
+	AssertArg(strchr(basename, '/') == NULL);
+	AssertState(Dynamic_library_path != NULL);
+
+	p = Dynamic_library_path;
+	if (strlen(p) == 0)
+		return NULL;
+
+	baselen = strlen(basename);
+
+	for (;;)
+	{
+		size_t		len;
+		char	   *piece;
+		char	   *mangled;
+		char	   *full;
+
+		len = strcspn(p, ":");
+
+		if (len == 0)
+			elog(ERROR, "zero length dynamic_library_path component");
+
+		piece = palloc(len + 1);
+		strncpy(piece, p, len);
+		piece[len] = '\0';
+
+		mangled = substitute_libpath_macro(piece);
+		pfree(piece);
+
+		/* only absolute paths */
+		if (mangled[0] != '/')
+			elog(ERROR, "dynamic_library_path component is not absolute");
+
+		full = palloc(strlen(mangled) + 1 + baselen + 1);
+		sprintf(full, "%s/%s", mangled, basename);
+		pfree(mangled);
+
+		elog(DEBUG2, "find_in_dynamic_libpath: trying %s", full);
+
+		if (file_exists(full))
+			return full;
+
+		pfree(full);
+
+		if (p[len] == '\0')
+			break;
+		else
+			p += len + 1;
+	}
+
+	return NULL;
+}
+
+
 /*
  * Functions used in R
- */
+ *****************************************************************************/
 void
 throw_pg_error(const char **msg)
 {
 	elog(NOTICE, "%s", *msg);
 }
 
+/*
+ * plr_quote_literal() - quote literal strings that are to
+ *			  be used in SPI_exec query strings
+ */
+SEXP
+plr_quote_literal(SEXP rval)
+{
+	char	   *value;
+	text	   *value_text;
+	text	   *result_text;
+	SEXP		result;
+
+	/* extract the C string */
+	PROTECT(rval =  AS_CHARACTER(rval));
+	value = CHAR(STRING_ELT(rval, 0));
+
+	/* convert using the pgsql quote_literal function */
+	value_text = PG_STR_GET_TEXT(value);
+	result_text = DatumGetTextP(DirectFunctionCall1(quote_literal, PointerGetDatum(value_text)));
+
+	/* copy result back into an R object */
+	PROTECT(result = NEW_CHARACTER(1));
+	SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(PG_TEXT_GET_STR(result_text)));
+	UNPROTECT(2);
+
+	return result;
+}
+
+/*
+ * plr_quote_literal() - quote identifiers that are to
+ *			  be used in SPI_exec query strings
+ */
+SEXP
+plr_quote_ident(SEXP rval)
+{
+	char	   *value;
+	text	   *value_text;
+	text	   *result_text;
+	SEXP		result;
+
+	/* extract the C string */
+	PROTECT(rval =  AS_CHARACTER(rval));
+	value = CHAR(STRING_ELT(rval, 0));
+
+	/* convert using the pgsql quote_literal function */
+	value_text = PG_STR_GET_TEXT(value);
+	result_text = DatumGetTextP(DirectFunctionCall1(quote_ident, PointerGetDatum(value_text)));
+
+	/* copy result back into an R object */
+	PROTECT(result = NEW_CHARACTER(1));
+	SET_STRING_ELT(result, 0, COPY_TO_USER_STRING(PG_TEXT_GET_STR(result_text)));
+	UNPROTECT(2);
+
+	return result;
+}
+
+
+
+
+
+
+
+
+
 
 
 
 /*
  * User visible PostgreSQL functions
- */
+ *****************************************************************************/
+
 /*-----------------------------------------------------------------------------
  * array :
  *		form a one-dimensional array given starting elements
