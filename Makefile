@@ -25,7 +25,7 @@ OBJS		:= $(SRCS:.c=.o)
 SHLIB_LINK = -L$(r_libdir) -lR
 
 DATA_built = plr.sql 
-DOCS = README.plr doc/*
+DOCS = README.plr doc/plr doc/r_support doc/pg_support
 REGRESS = plr
 
 include $(top_srcdir)/contrib/contrib-global.mk

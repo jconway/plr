@@ -84,16 +84,16 @@ select sprintf('%s is %s feet tall', 'Sven', '7');
 --
 -- test aggregates
 --
-create table foo(f1 text, f2 float8);
-insert into foo values('cat1',1.21);
-insert into foo values('cat1',1.24);
-insert into foo values('cat1',1.18);
-insert into foo values('cat1',1.26);
-insert into foo values('cat1',1.15);
-insert into foo values('cat2',1.15);
-insert into foo values('cat2',1.26);
-insert into foo values('cat2',1.32);
-insert into foo values('cat2',1.30);
+create table foo(f0 int, f1 text, f2 float8);
+insert into foo values(1,'cat1',1.21);
+insert into foo values(2,'cat1',1.24);
+insert into foo values(3,'cat1',1.18);
+insert into foo values(4,'cat1',1.26);
+insert into foo values(5,'cat1',1.15);
+insert into foo values(6,'cat2',1.15);
+insert into foo values(7,'cat2',1.26);
+insert into foo values(8,'cat2',1.32);
+insert into foo values(9,'cat2',1.30);
 
 create or replace function r_median(_float8) returns float as 'median(arg1)' language 'plr';
 select r_median('{1.23,1.31,1.42,1.27}'::_float8);
@@ -211,4 +211,23 @@ create or replace function test_spi_execp(text, text, text) returns record as 'p
 select * from test_spi_execp('sp','oid','text') as t(typeid oid, typename name);
 
 create or replace function test_spi_lastoid(text) returns text as 'pg.spi.exec(arg1); pg.spi.lastoid()/pg.spi.lastoid()' language 'plr';
-select test_spi_lastoid('insert into foo values(''cat3'',3.333)') as "ONE";
+select test_spi_lastoid('insert into foo values(10,''cat3'',3.333)') as "ONE";
+
+--
+-- test NULL handling
+--
+CREATE OR REPLACE FUNCTION r_test (float8) RETURNS float8 AS 'arg1' LANGUAGE 'plr';
+select r_test(null) is null as "NULL";
+
+CREATE OR REPLACE FUNCTION r_max (integer, integer) RETURNS integer AS 'if (is.na(arg1) && is.na(arg2)) return(NA);if (is.na(arg1)) return(arg2);if (is.na(arg2)) return(arg1);if (arg1 > arg2) return(arg1);arg2' LANGUAGE 'plr';
+select r_max(1,2) as "TWO";
+select r_max(null,2) as "TWO";
+select r_max(1,null) as "ONE";
+select r_max(null,null) is null as "NULL";
+
+--
+-- test tuple arguments
+--
+create or replace function get_foo(int) returns foo as 'select * from foo where f0 = $1' language 'sql';
+create or replace function test_foo(foo) returns foo as 'return(arg1)' language 'plr';
+select * from test_foo(get_foo(1));

@@ -1,6 +1,6 @@
 /*
- * plr - PostgreSQL support for R as a
- *	     procedural language (PL)
+ * PL/R - PostgreSQL support for R as a
+ *	      procedural language (PL)
  *
  * Copyright (c) 2003 by Joseph E. Conway
  * ALL RIGHTS RESERVED;
@@ -12,21 +12,22 @@
  * Duncan Temple Lang <duncan@research.bell-labs.com>
  * http://www.omegahat.org/RSPostgres/
  *
- * License: GPL version 2 or newer. http://www.gnu.org/copyleft/gpl.html
- * 
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose, without fee, and without a written agreement
+ * is hereby granted, provided that the above copyright notice and this
+ * paragraph and the following two paragraphs appear in all copies.
+ *
+ * IN NO EVENT SHALL THE AUTHORS OR DISTRIBUTORS BE LIABLE TO ANY PARTY FOR
+ * DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+ * LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS
+ * DOCUMENTATION, EVEN IF THE AUTHOR OR DISTRIBUTORS HAVE BEEN ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ * THE AUTHORS AND DISTRIBUTORS SPECIFICALLY DISCLAIM ANY WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ * ON AN "AS IS" BASIS, AND THE AUTHOR AND DISTRIBUTORS HAS NO OBLIGATIONS TO
+ * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
  *
  * pg_rsupport.c - Postgres support for use within plr functions
  */
@@ -200,167 +201,15 @@ plr_SPI_exec(SEXP rsql)
 static SEXP
 rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 {
-	/*
-	 * Make sure we have a result
-	 */
 	if (tuptable != NULL)
 	{
 		HeapTuple	   *tuples = tuptable->vals;
 		TupleDesc		tupdesc = tuptable->tupdesc;
-		int				nr = ntuples;
-		int				nc = tupdesc->natts;
-		int				i = 0;
-		int				j = 0;
-		SEXP			fldvec = NULL;
-		SEXP			names = NULL;
-		SEXP			row_names = NULL;
-		char			buf[256];
-		SEXP			result;
-		char		   *value;
-		SEXP			fun, rargs;
 
-		/* get a reference to the R "factor" function */
-		PROTECT(fun = Rf_findFun(Rf_install("factor"), R_GlobalEnv));
-
-		/*
-		 * create an array of R objects with the number of elements
-		 * equal to the number of arguments needed by "factor".
-		 */
-		PROTECT(rargs = allocVector(VECSXP, 2));
-
-		/* the first arg to "factor" is NIL */
-		SET_VECTOR_ELT(rargs, 0, R_NilValue);
-
-		/*
-		 * Allocate the data.frame initially as a list,
-		 * and also allocate a names vector for the column names
-		 */
-		PROTECT(result = allocVector(VECSXP, nc));
-	    PROTECT(names = allocVector(STRSXP, nc));
-
-		/*
-		 * Loop by columns
-		 */
-		for (j = 0; j < nc; j++)		
-		{
-			/*
-			 * Set column name
-			 */
-			SET_STRING_ELT(names, j,  mkChar(SPI_fname(tupdesc, j + 1)));
-
-			/*
-			 * Loop rows, setting vector datatype based on pgsql datatype
-			 */
-			switch (SPI_gettypeid(tupdesc, j + 1))
-			{
-				case OIDOID:
-				case INT2OID:
-				case INT4OID:
-					/*
-					 * 2 and 4 byte integer pgsql datatype => use R INTEGER
-					 */
-					PROTECT(fldvec = NEW_INTEGER(nr));
-
-					for (i = 0; i < nr; i++)
-					{
-						if ((value = SPI_getvalue(tuples[i], tupdesc, j + 1)))
-							INTEGER(fldvec)[i] = atoi(value);
-						else
-							SET_STRING_ELT(fldvec, i, NA_STRING);
-					}
-				    break;
-				case INT8OID:
-				case FLOAT4OID:
-				case FLOAT8OID:
-				case CASHOID:
-				case NUMERICOID:
-					/*
-					 * Other numeric types => use R REAL
-					 * Note pgsql int8 is mapped to R REAL
-					 * because R INTEGER is only 4 byte
-					 */
-					PROTECT(fldvec = NEW_NUMERIC(nr));
-
-					for (i = 0; i < nr; i++)
-					{
-						if ((value = SPI_getvalue(tuples[i], tupdesc, j + 1)))
-							REAL(fldvec)[i] = atof(value);
-						else
-							SET_STRING_ELT(fldvec, i, NA_STRING);
-					}
-
-				    break;
-				case BOOLOID:
-					PROTECT(fldvec = NEW_LOGICAL(nr));
-
-					for (i = 0; i < nr; i++)
-					{
-						if ((value = SPI_getvalue(tuples[i], tupdesc, j + 1)))
-							LOGICAL(fldvec)[i] = ((*value == 't') ? 1 : 0);
-						else
-							SET_STRING_ELT(fldvec, i, NA_STRING);
-					}
-
-				    break;
-				default:
-					/*
-					 * Everything else is defaulted to string
-					 * which should be converted into a factor column
-					 */
-					PROTECT(fldvec = NEW_CHARACTER(nr));
-
-					for (i = 0; i < nr; i++)
-					{
-						if ((value = SPI_getvalue(tuples[i], tupdesc, j + 1)))
-							SET_STRING_ELT(fldvec, i, mkChar(value));
-						else
-							SET_STRING_ELT(fldvec, i, NA_STRING);
-					}
-
-					/* the second arg to "factor" is our character vector */
-					SET_VECTOR_ELT(rargs, 1, fldvec);
-
-					/* convert to a factor */
-					PROTECT(fldvec = call_r_func(fun, rargs));
-					UNPROTECT(1);
-			}
-
-			SET_VECTOR_ELT(result, j, fldvec);
-			UNPROTECT(1);
-		}
-
-		/*
-		 * Attach the column names
-		 */
-	    setAttrib(result, R_NamesSymbol, names);
-		UNPROTECT(3);
-
-		/*
-		 * Attach the row names - basically just the row number,
-		 * zero based.
-		 */
-		PROTECT(row_names = allocVector(STRSXP, nr));
-		for (i=0; i<nr; i++)
-		{
-		    sprintf(buf, "%d", i+1);
-		    SET_STRING_ELT(row_names, i, mkChar(buf));
-		}
-		setAttrib(result, R_RowNamesSymbol, row_names);
-
-		/*
-		 * Finally, tell R we are a "data.frame"
-		 */
-	    setAttrib(result, R_ClassSymbol, mkString("data.frame"));
-
-		UNPROTECT(2);
-		return(result);
+		return pg_tuple_get_r_frame(ntuples, tuples, tupdesc);
 	}
 	else
-		/*
-		 * no result, return nothing
-		 */
 		return(R_NilValue);
-
 }
 
 /*
@@ -541,6 +390,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	int					i;
 	Datum			   *argvalues = NULL;
 	char			   *nulls = NULL;
+	bool				isnull = false;
 	SEXP				obj;
 	int					spi_rc;
 	char				buf[64];
@@ -564,8 +414,8 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	{
 		PROTECT(obj = VECTOR_ELT(rargvalues, i));
 
-		argvalues[i] = get_scalar_datum(obj, typinfuncs[i], typelems[i]);
-		if (argvalues[i] != (Datum) 0)
+		argvalues[i] = get_scalar_datum(obj, typinfuncs[i], typelems[i], &isnull);
+		if (!isnull)
 			nulls[i] = ' ';
 		else
 			nulls[i] = 'n';

@@ -1,6 +1,6 @@
 /*
- * plr - PostgreSQL support for R as a
- *	     procedural language (PL)
+ * PL/R - PostgreSQL support for R as a
+ *	      procedural language (PL)
  *
  * Copyright (c) 2003 by Joseph E. Conway
  * ALL RIGHTS RESERVED;
@@ -12,21 +12,22 @@
  * Duncan Temple Lang <duncan@research.bell-labs.com>
  * http://www.omegahat.org/RSPostgres/
  *
- * License: GPL version 2 or newer. http://www.gnu.org/copyleft/gpl.html
- * 
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose, without fee, and without a written agreement
+ * is hereby granted, provided that the above copyright notice and this
+ * paragraph and the following two paragraphs appear in all copies.
+ *
+ * IN NO EVENT SHALL THE AUTHORS OR DISTRIBUTORS BE LIABLE TO ANY PARTY FOR
+ * DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+ * LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS
+ * DOCUMENTATION, EVEN IF THE AUTHOR OR DISTRIBUTORS HAVE BEEN ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ * THE AUTHORS AND DISTRIBUTORS SPECIFICALLY DISCLAIM ANY WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ * ON AN "AS IS" BASIS, AND THE AUTHOR AND DISTRIBUTORS HAS NO OBLIGATIONS TO
+ * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
  *
  * pg_conversion.c - functions for converting arguments from pg types to
  *                   R types, and for converting return values from R types
@@ -37,12 +38,12 @@
 #include "miscadmin.h"
 
 static void pg_get_one_r(char *value, Oid arg_out_fn_oid, SEXP *obj, int elnum);
-static void get_r_vector(Oid typtype, SEXP *obj, int numels);
-static Datum get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo);
-static Datum get_array_datum(SEXP rval, plr_proc_desc *prodesc);
-static Datum get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc);
-static Datum get_matrix_array_datum(SEXP rval, plr_proc_desc *prodesc);
-static Datum get_generic_array_datum(SEXP rval, plr_proc_desc *prodesc);
+static SEXP get_r_vector(Oid typtype, int numels);
+static Datum get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo, bool *isnull);
+static Datum get_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull);
+static Datum get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull);
+static Datum get_matrix_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull);
+static Datum get_generic_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull);
 static Tuplestorestate *get_frame_tuplestore(SEXP rval,
 											 plr_proc_desc *prodesc,
 											 AttInMetadata *attinmeta,
@@ -57,126 +58,293 @@ static Tuplestorestate *get_generic_tuplestore(SEXP rval,
 											 MemoryContext per_query_ctx);
 
 /*
- * given a pg value, convert to its R value representation
+ * given a scalar pg value, convert to a one row R vector
  */
 SEXP
-pg_get_r(plr_proc_desc *prodesc, FunctionCallInfo fcinfo, int idx)
+pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func)
 {
-	Datum		dvalue = fcinfo->arg[idx];
-	Oid			arg_typid = prodesc->arg_typid[idx];
-	FmgrInfo	arg_out_func = prodesc->arg_out_func[idx];
-	Oid			arg_elem = prodesc->arg_elem[idx];
-	SEXP		obj = NULL;
+	SEXP		result;
 	char	   *value;
 
-	PROTECT(obj);
-
-	if (arg_elem == 0)
+	if (dvalue == (Datum) 0)
 	{
-		/*
-		 * if the element type is zero, we don't have an array,
-		 * so just convert as a scalar value
-		 */
-		value = DatumGetCString(FunctionCall3(&arg_out_func,
-											  dvalue,
-								 			  ObjectIdGetDatum(arg_elem),
-											  Int32GetDatum(-1)));
+		/* fast track for null arguments */
+		PROTECT(result = NEW_CHARACTER(1));
+		SET_STRING_ELT(result, 0, NA_STRING);
+		UNPROTECT(1);
 
-		if (value != NULL)
-		{
-			/* get new vector of the appropriate type, length 1 */
-			get_r_vector(arg_typid, &obj, 1);
+		return result;
+	}
 
-			/* add our value to it */
-			pg_get_one_r(value, arg_typid, &obj, 0);
-		}
-		else
-		{
-			obj = NEW_CHARACTER(1);
-			SET_STRING_ELT(obj, 0, NA_STRING);
-		}
+	value = DatumGetCString(FunctionCall3(&arg_out_func,
+										  dvalue,
+							 			  (Datum) 0,
+										  Int32GetDatum(-1)));
+
+	if (value != NULL)
+	{
+		/* get new vector of the appropriate type, length 1 */
+		PROTECT(result = get_r_vector(arg_typid, 1));
+
+		/* add our value to it */
+		pg_get_one_r(value, arg_typid, &result, 0);
 	}
 	else
 	{
-		/*
-		 * We do have an array, so loop through and convert each scalar value.
-		 * Use the converted values to build an R vector.
-		 */
-		ArrayType  *v = (ArrayType *) dvalue;
-		Oid			element_type;
-		int			i,
-					nitems,
-					ndim,
-				   *dim;
-		char	   *p;
-		FmgrInfo	out_func = prodesc->arg_elem_out_func[idx];
-		int			typlen = prodesc->arg_elem_typlen[idx];
-		bool		typbyval = prodesc->arg_elem_typbyval[idx];
-		char		typalign = prodesc->arg_elem_typalign[idx];
-
-		/* only support one-dim arrays for the moment */
-		ndim = ARR_NDIM(v);
-		if (ndim > 1)
-			elog(ERROR, "plr: multiple dimension arrays are not yet supported");
-
-		element_type = ARR_ELEMTYPE(v);
-		/* sanity check */
-		if (element_type != arg_elem)
-			elog(ERROR, "plr: declared and actual types for array elements do not match");
-
-		dim = ARR_DIMS(v);
-		nitems = ArrayGetNItems(ndim, dim);
-
-		/* pass an NA if the array is empty */
-		if (nitems == 0)
-		{
-			obj = NEW_CHARACTER(1);
-			SET_STRING_ELT(obj, 0, NA_STRING);
-
-			UNPROTECT(1);
-			return(obj);
-		}
-
-		/* get new vector of the appropriate type and length */
-		get_r_vector(element_type, &obj, nitems);
-
-		/* Convert all values to their R form and build the vector */
-		p = ARR_DATA_PTR(v);
-		for (i = 0; i < nitems; i++)
-		{
-			Datum		itemvalue;
-
-			itemvalue = fetch_att(p, typbyval, typlen);
-			value = DatumGetCString(FunctionCall3(&out_func,
-													  itemvalue,
-													  (Datum) 0,
-													  Int32GetDatum(-1)));
-			p = att_addlength(p, typlen, PointerGetDatum(p));
-			p = (char *) att_align(p, typalign);
-
-			if (value != NULL)
-				pg_get_one_r(value, arg_elem, &obj, i);
-			else
-				SET_STRING_ELT(obj, i, NA_STRING);
-		}
+		PROTECT(result = NEW_CHARACTER(1));
+		SET_STRING_ELT(result, 0, NA_STRING);
 	}
 
 	UNPROTECT(1);
-	return(obj);
+
+	return result;
+}
+
+
+/*
+ * given an array pg value, convert to a multi-row R vector
+ */
+SEXP
+pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char typalign)
+{
+	/*
+	 * Loop through and convert each scalar value.
+	 * Use the converted values to build an R vector.
+	 */
+	SEXP		result;
+	char	   *value;
+	ArrayType  *v = (ArrayType *) dvalue;
+	Oid			element_type;
+	int			i,
+				nitems,
+				ndim,
+			   *dim;
+	char	   *p;
+
+	/* only support one-dim arrays for the moment */
+	ndim = ARR_NDIM(v);
+	if (ndim > 1)
+		elog(ERROR, "plr: multiple dimension arrays are not yet supported as function arguments");
+
+	element_type = ARR_ELEMTYPE(v);
+	dim = ARR_DIMS(v);
+	nitems = ArrayGetNItems(ndim, dim);
+
+	/* pass an NA if the array is empty */
+	if (nitems == 0)
+	{
+		PROTECT(result = NEW_CHARACTER(1));
+		SET_STRING_ELT(result, 0, NA_STRING);
+		UNPROTECT(1);
+
+		return result;
+	}
+
+	/* get new vector of the appropriate type and length */
+	PROTECT(result = get_r_vector(element_type, nitems));
+
+	/* Convert all values to their R form and build the vector */
+	p = ARR_DATA_PTR(v);
+	for (i = 0; i < nitems; i++)
+	{
+		Datum		itemvalue;
+
+		itemvalue = fetch_att(p, typbyval, typlen);
+		value = DatumGetCString(FunctionCall3(&out_func,
+												  itemvalue,
+												  (Datum) 0,
+												  Int32GetDatum(-1)));
+		p = att_addlength(p, typlen, PointerGetDatum(p));
+		p = (char *) att_align(p, typalign);
+
+		if (value != NULL)
+			pg_get_one_r(value, element_type, &result, i);
+		else
+			SET_STRING_ELT(result, i, NA_STRING);
+	}
+
+	UNPROTECT(1);
+
+	return result;
+}
+
+/*
+ * given an array of pg tuples, convert to an R data.frame
+ */
+SEXP
+pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
+{
+	int			nr = ntuples;
+	int			nc = tupdesc->natts;
+	int			i = 0;
+	int			j = 0;
+	Oid			element_type;
+	Oid			typelem;
+	SEXP		names = NULL;
+	SEXP		row_names = NULL;
+	char		buf[256];
+	SEXP		result;
+	SEXP		fun, rargs;
+	SEXP		fldvec;
+
+	if (tuples == NULL || ntuples < 1)
+		return(R_NilValue);
+
+	/* get a reference to the R "factor" function */
+	PROTECT(fun = Rf_findFun(Rf_install("factor"), R_GlobalEnv));
+
+	/*
+	 * create an array of R objects with the number of elements
+	 * equal to the number of arguments needed by "factor".
+	 */
+	PROTECT(rargs = allocVector(VECSXP, 2));
+
+	/* the first arg to "factor" is NIL */
+	SET_VECTOR_ELT(rargs, 0, R_NilValue);
+
+	/*
+	 * Allocate the data.frame initially as a list,
+	 * and also allocate a names vector for the column names
+	 */
+	PROTECT(result = allocVector(VECSXP, nc));
+    PROTECT(names = allocVector(STRSXP, nc));
+
+	/*
+	 * Loop by columns
+	 */
+	for (j = 0; j < nc; j++)		
+	{
+		int			typlen;
+		bool		typbyval;
+		char		typdelim;
+		Oid			typoutput,
+					elemtypelem;
+		FmgrInfo	outputproc;
+		char		typalign;
+
+		/* set column name */
+		SET_STRING_ELT(names, j,  mkChar(SPI_fname(tupdesc, j + 1)));
+
+		/* get column datatype oid */
+		element_type = SPI_gettypeid(tupdesc, j + 1);
+
+		/* special case -- NAME looks like an array, but treat as a scalar */
+		if (element_type == NAMEOID)
+			typelem = 0;
+		else
+			/* check to see it it is an array type */
+			typelem = get_typelem(element_type);
+
+		/* get new vector of the appropriate type and length */
+		if (typelem == 0)
+			PROTECT(fldvec = get_r_vector(element_type, nr));
+		else
+		{
+			PROTECT(fldvec = NEW_LIST(nr));
+			system_cache_lookup(typelem, false, &typlen, &typbyval,
+								&typdelim, &elemtypelem, &typoutput, &typalign);
+			fmgr_info(typoutput, &outputproc);
+		}
+
+		/* loop rows for this column */
+		for (i = 0; i < nr; i++)
+		{
+			if (typelem == 0)
+			{
+				/* not an array type */
+				char	   *value;
+
+				value = SPI_getvalue(tuples[i], tupdesc, j + 1);
+				if (value != NULL)
+					pg_get_one_r(value, element_type, &fldvec, i);
+				else
+					SET_STRING_ELT(fldvec, i, NA_STRING);
+			}
+			else
+			{
+				/* array type */
+				Datum		dvalue;
+				bool		isnull;
+				SEXP		fldvec_elem;
+
+				dvalue = SPI_getbinval(tuples[i], tupdesc, j + 1, &isnull);
+				if (!isnull)
+					PROTECT(fldvec_elem = pg_array_get_r(dvalue, outputproc, typlen, typbyval, typalign));
+				else
+				{
+					PROTECT(fldvec_elem = NEW_CHARACTER(1));
+					SET_STRING_ELT(fldvec_elem, 0, NA_STRING);
+				}
+
+				SET_VECTOR_ELT(fldvec, i, fldvec_elem);
+				UNPROTECT(1);
+			}
+		}
+
+		/* convert column into a factor column if needed */
+		if (typelem == 0)
+		{
+			switch(element_type)
+			{
+				case OIDOID:
+				case INT2OID:
+				case INT4OID:
+				case INT8OID:
+				case FLOAT4OID:
+				case FLOAT8OID:
+				case CASHOID:
+				case NUMERICOID:
+				case BOOLOID:
+					/* do nothing */
+				    break;
+				default:
+					/* the second arg to "factor" is our character vector */
+					SET_VECTOR_ELT(rargs, 1, fldvec);
+
+					/* convert to a factor */
+					PROTECT(fldvec = call_r_func(fun, rargs));
+					UNPROTECT(1);
+			}
+		}
+
+		SET_VECTOR_ELT(result, j, fldvec);
+		UNPROTECT(1);
+	}
+
+	/* attach the column names */
+    setAttrib(result, R_NamesSymbol, names);
+	UNPROTECT(3);
+
+	/* attach row names - basically just the row number, zero based */
+	PROTECT(row_names = allocVector(STRSXP, nr));
+	for (i=0; i<nr; i++)
+	{
+	    sprintf(buf, "%d", i+1);
+	    SET_STRING_ELT(row_names, i, mkChar(buf));
+	}
+	setAttrib(result, R_RowNamesSymbol, row_names);
+
+	/* finally, tell R we are a "data.frame" */
+    setAttrib(result, R_ClassSymbol, mkString("data.frame"));
+
+	UNPROTECT(2);
+	return result;
 }
 
 /*
  * create an R vector of a given type and size based on pg output function oid
  */
-static void
-get_r_vector(Oid typtype, SEXP *obj, int numels)
+static SEXP
+get_r_vector(Oid typtype, int numels)
 {
+	SEXP	result;
+
 	switch (typtype)
 	{
 		case INT2OID:
 		case INT4OID:
 			/* 2 and 4 byte integer pgsql datatype => use R INTEGER */
-			*obj = NEW_INTEGER(numels);
+			PROTECT(result = NEW_INTEGER(numels));
 		    break;
 		case INT8OID:
 		case FLOAT4OID:
@@ -188,15 +356,18 @@ get_r_vector(Oid typtype, SEXP *obj, int numels)
 			 * Note pgsql int8 is mapped to R REAL
 			 * because R INTEGER is only 4 byte
 			 */
-			*obj = NEW_NUMERIC(numels);
+			PROTECT(result = NEW_NUMERIC(numels));
 		    break;
 		case BOOLOID:
-			*obj = NEW_LOGICAL(numels);
+			PROTECT(result = NEW_LOGICAL(numels));
 		    break;
 		default:
 			/* Everything else is defaulted to string */
-			*obj = NEW_CHARACTER(numels);
+			PROTECT(result = NEW_CHARACTER(numels));
 	}
+	UNPROTECT(1);
+
+	return result;
 }
 
 /*
@@ -239,23 +410,34 @@ pg_get_one_r(char *value, Oid typtype, SEXP *obj, int elnum)
 Datum
 r_get_pg(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 {
+	bool	isnull = false;
+	Datum	result;
+
 	/* short circuit if return value is Null */
-	if (isNull(rval))
+	if (isNull(rval) || length(rval) == 0)
+	{
+		fcinfo->isnull = true;
 		return (Datum) 0;
+	}
 
 	if (prodesc->result_istuple)
-		return get_tuplestore(rval, prodesc, fcinfo);
+		result = get_tuplestore(rval, prodesc, fcinfo, &isnull);
 	else
 	{
 		if (prodesc->result_elem == 0)
-			return get_scalar_datum(rval, prodesc->result_in_func, prodesc->result_elem);
+			result = get_scalar_datum(rval, prodesc->result_in_func, prodesc->result_elem, &isnull);
 		else
-			return get_array_datum(rval, prodesc);
+			result = get_array_datum(rval, prodesc, &isnull);
 	}
+
+	if (isnull)
+		fcinfo->isnull = true;
+
+	return result;
 }
 
 static Datum
-get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
+get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo, bool *isnull)
 {
 	ReturnSetInfo  *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	TupleDesc		tupdesc;
@@ -264,12 +446,8 @@ get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 	MemoryContext	oldcontext;
 	int				nc;
 
-	/* short circuit if there is nothing to return */
-	if (length(rval) == 0)
-		return (Datum) 0;
-
 	/* check to see if caller supports us returning a tuplestore */
-	if (!rsinfo->allowedModes & SFRM_Materialize)
+	if (!rsinfo || (!rsinfo->allowedModes & SFRM_Materialize))
 		elog(ERROR, "plr: Materialize mode required, but it is not "
 			 "allowed in this context");
 
@@ -320,11 +498,12 @@ get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 	rsinfo->setDesc = tupdesc;
 	MemoryContextSwitchTo(oldcontext);
 
+	*isnull = true;
 	return (Datum) 0;
 }
 
 Datum
-get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem)
+get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem, bool *isnull)
 {
 	Datum		dvalue;
 	SEXP		obj;
@@ -337,13 +516,23 @@ get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem)
 	PROTECT(obj = AS_CHARACTER(rval));
 	value = CHAR(STRING_ELT(obj, 0));
 
-	if (value != NULL)
+	if (STRING_ELT(obj, 0) == NA_STRING)
+	{
+		*isnull = true;
+		dvalue = (Datum) 0;
+	}
+	else if (value != NULL)
+	{
 		dvalue = FunctionCall3(&result_in_func,
 								CStringGetDatum(value),
 								ObjectIdGetDatum(result_elem),
 								Int32GetDatum(-1));
+	}
 	else
+	{
+		*isnull = true;
 		dvalue = (Datum) 0;
+	}
 
 	UNPROTECT(1);
 
@@ -351,22 +540,18 @@ get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem)
 }
 
 static Datum
-get_array_datum(SEXP rval, plr_proc_desc *prodesc)
+get_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
 {
-	/* short circuit if there is nothing to return */
-	if (length(rval) == 0)
-		return (Datum) 0;
-
 	if (isFrame(rval))
-		return get_frame_array_datum(rval, prodesc);
+		return get_frame_array_datum(rval, prodesc, isnull);
 	else if (isMatrix(rval))
-		return get_matrix_array_datum(rval, prodesc);
+		return get_matrix_array_datum(rval, prodesc, isnull);
 	else
-		return get_generic_array_datum(rval, prodesc);
+		return get_generic_array_datum(rval, prodesc, isnull);
 }
 
 static Datum
-get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc)
+get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
 {
 	Datum		dvalue;
 	SEXP		obj;
@@ -379,7 +564,6 @@ get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc)
 	int			i;
 	Datum	   *dvalues = NULL;
 	ArrayType  *array;
-
 	int			nr = 0;
 	int			nc = length(rval);
 	int			ndims = 2;
@@ -420,13 +604,13 @@ get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc)
 			value = CHAR(STRING_ELT(obj, i));
 			idx = ((i * nc) + j);
 
-			if (value != NULL)
+			if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
+				elog(ERROR, "plr: cannot return array with NULL elements");
+			else
 				dvalues[idx] = FunctionCall3(&in_func,
 										CStringGetDatum(value),
 										(Datum) 0,
 										Int32GetDatum(-1));
-			else
-				dvalues[idx] = (Datum) 0;
 	    }
 		UNPROTECT(2);
 	}
@@ -458,7 +642,7 @@ get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc)
 }
 
 static Datum
-get_matrix_array_datum(SEXP rval, plr_proc_desc *prodesc)
+get_matrix_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
 {
 	Datum		dvalue;
 	SEXP		obj;
@@ -496,13 +680,13 @@ get_matrix_array_datum(SEXP rval, plr_proc_desc *prodesc)
 		value = CHAR(STRING_ELT(obj, i));
 		idx = ((i % nr) * nc) + (i / nr);
 
-		if (value != NULL)
+		if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
+			elog(ERROR, "plr: cannot return array with NULL elements");
+		else
 			dvalues[idx] = FunctionCall3(&in_func,
 									CStringGetDatum(value),
 									(Datum) 0,
 									Int32GetDatum(-1));
-		else
-			dvalues[idx] = (Datum) 0;
     }
 	UNPROTECT(1);
 
@@ -528,7 +712,7 @@ get_matrix_array_datum(SEXP rval, plr_proc_desc *prodesc)
 }
 
 static Datum
-get_generic_array_datum(SEXP rval, plr_proc_desc *prodesc)
+get_generic_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
 {
 	int			objlen = length(rval);
 	Datum		dvalue;
@@ -551,13 +735,13 @@ get_generic_array_datum(SEXP rval, plr_proc_desc *prodesc)
 	{
 		value = CHAR(STRING_ELT(obj, i));
 
-		if (value != NULL)
+		if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
+			elog(ERROR, "plr: cannot return array with NULL elements");
+		else
 			dvalues[i] = FunctionCall3(&in_func,
 									CStringGetDatum(value),
 									(Datum) 0,
 									Int32GetDatum(-1));
-		else
-			dvalues[i] = (Datum) 0;
     }
 	UNPROTECT(1);
 

@@ -1,6 +1,6 @@
 /*
- * plr - PostgreSQL support for R as a
- *	     procedural language (PL)
+ * PL/R - PostgreSQL support for R as a
+ *	      procedural language (PL)
  *
  * Copyright (c) 2003 by Joseph E. Conway
  * ALL RIGHTS RESERVED;
@@ -12,21 +12,22 @@
  * Duncan Temple Lang <duncan@research.bell-labs.com>
  * http://www.omegahat.org/RSPostgres/
  *
- * License: GPL version 2 or newer. http://www.gnu.org/copyleft/gpl.html
- * 
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose, without fee, and without a written agreement
+ * is hereby granted, provided that the above copyright notice and this
+ * paragraph and the following two paragraphs appear in all copies.
+ *
+ * IN NO EVENT SHALL THE AUTHORS OR DISTRIBUTORS BE LIABLE TO ANY PARTY FOR
+ * DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+ * LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS
+ * DOCUMENTATION, EVEN IF THE AUTHOR OR DISTRIBUTORS HAVE BEEN ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ * THE AUTHORS AND DISTRIBUTORS SPECIFICALLY DISCLAIM ANY WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ * ON AN "AS IS" BASIS, AND THE AUTHOR AND DISTRIBUTORS HAS NO OBLIGATIONS TO
+ * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
  *
  * plr.c - Language handler and support functions
  */
@@ -681,7 +682,12 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 
 				prodesc->arg_typid[i] = procStruct->proargtypes[i];
 				perm_fmgr_info(typeStruct->typoutput, &(prodesc->arg_out_func[i]));
-				prodesc->arg_elem[i] = typeStruct->typelem;
+
+				/* special case -- NAME looks like an array, but treat as a scalar */
+				if (prodesc->arg_typid[i] == NAMEOID)
+					prodesc->arg_elem[i] = 0;
+				else
+					prodesc->arg_elem[i] = typeStruct->typelem;
 
 				if (i > 0)
 					appendStringInfo(proc_internal_args, ",");
@@ -854,8 +860,44 @@ plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 	 */
 	for (i = 0; i < prodesc->nargs; i++)
 	{
-		el = pg_get_r(prodesc, fcinfo, i);
+		if (fcinfo->argnull[i])
+		{
+			/* fast track for null arguments */
+			PROTECT(el = NEW_CHARACTER(1));
+			SET_STRING_ELT(el, 0, NA_STRING);
+		}
+		else if (prodesc->arg_is_rel[i])
+		{
+			/* for tuple args, convert to a one row data.frame */
+			TupleTableSlot *slot = (TupleTableSlot *) fcinfo->arg[i];
+			HeapTuple		tuples = slot->val;
+			TupleDesc		tupdesc = slot->ttc_tupleDescriptor;
+
+			PROTECT(el = pg_tuple_get_r_frame(1, &tuples, tupdesc));
+		}
+		else if (prodesc->arg_elem[i] == 0)
+		{
+			/* for scalar args, convert to a one row vector */
+			Datum		dvalue = fcinfo->arg[i];
+			Oid			arg_typid = prodesc->arg_typid[i];
+			FmgrInfo	arg_out_func = prodesc->arg_out_func[i];
+
+			PROTECT(el = pg_scalar_get_r(dvalue, arg_typid, arg_out_func));
+		}
+		else
+		{
+			/* better be a pg array arg, convert to a multi-row vector */
+			Datum		dvalue = fcinfo->arg[i];
+			FmgrInfo	out_func = prodesc->arg_elem_out_func[i];
+			int			typlen = prodesc->arg_elem_typlen[i];
+			bool		typbyval = prodesc->arg_elem_typbyval[i];
+			char		typalign = prodesc->arg_elem_typalign[i];
+
+			PROTECT(el = pg_array_get_r(dvalue, out_func, typlen, typbyval, typalign));
+		}
+
 		SET_VECTOR_ELT(rargs, i, el);
+		UNPROTECT(1);
 	}
 
 	UNPROTECT(1);

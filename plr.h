@@ -1,6 +1,6 @@
 /*
- * plr - PostgreSQL support for R as a
- *	     procedural language (PL)
+ * PL/R - PostgreSQL support for R as a
+ *	      procedural language (PL)
  *
  * Copyright (c) 2003 by Joseph E. Conway
  * ALL RIGHTS RESERVED;
@@ -12,21 +12,22 @@
  * Duncan Temple Lang <duncan@research.bell-labs.com>
  * http://www.omegahat.org/RSPostgres/
  *
- * License: GPL version 2 or newer. http://www.gnu.org/copyleft/gpl.html
- * 
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation for any purpose, without fee, and without a written agreement
+ * is hereby granted, provided that the above copyright notice and this
+ * paragraph and the following two paragraphs appear in all copies.
+ *
+ * IN NO EVENT SHALL THE AUTHORS OR DISTRIBUTORS BE LIABLE TO ANY PARTY FOR
+ * DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+ * LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS
+ * DOCUMENTATION, EVEN IF THE AUTHOR OR DISTRIBUTORS HAVE BEEN ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ * THE AUTHORS AND DISTRIBUTORS SPECIFICALLY DISCLAIM ANY WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ * ON AN "AS IS" BASIS, AND THE AUTHOR AND DISTRIBUTORS HAS NO OBLIGATIONS TO
+ * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
  *
  * plr.h
  */
@@ -156,9 +157,11 @@ extern void load_r_cmd(const char *cmd);
 extern SEXP call_r_func(SEXP fun, SEXP rargs);
 
 /* argument and return value conversion functions */
-extern SEXP pg_get_r(plr_proc_desc *prodesc, FunctionCallInfo fcinfo, int idx);
+extern SEXP pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func);
+extern SEXP pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char typalign);
+extern SEXP pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc);
 extern Datum r_get_pg(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo);
-extern Datum get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem);
+extern Datum get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem, bool *isnull);
 
 /* Postgres support functions installed into the R interpreter */
 extern void throw_pg_error(const char **msg);
@@ -181,6 +184,7 @@ extern void perm_fmgr_info(Oid functionId, FmgrInfo *finfo);
 extern void system_cache_lookup(Oid element_type, bool input, int *typlen,
 					bool *typbyval, char *typdelim, Oid *typelem,
 					Oid *proc, char *typalign);
+extern Oid get_typelem(Oid element_type);
 
 /*
  * See the no-exported header file ${R_HOME}/src/include/Parse.h
