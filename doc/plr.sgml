@@ -8,25 +8,67 @@
   </copyright>
  </bookinfo>
 
- <chapter id="plr-intro">
-  <title>Introduction</title>
+ <chapter id="plr-overview">
+   <title>Overview</title>
 
+   <para>
+    PL/R is a loadable procedural language that enables you to write
+    PostgreSQL functions in the <ulink url="http://www.r-project.org/">R
+    programming language</ulink>. PL/R offers most (if not all) of the
+    capabilities a function writer has in the R language.
+   </para>
+
+   <para>
+    Commands are available to access the database via the PostgreSQL Server 
+    Programming Interface (SPI) and to raise messages via <function>elog()
+    </function>. There is no way to access internals of the database backend.
+    However the user is able to gain OS-level access under the permissions of
+    the PostgreSQL user ID, as with a C function. Thus, any unprivileged
+    database user should not be permitted to use this language. It 
+    <emphasis>must be installed as an untrusted procedural language</emphasis>
+    so that only database superusers can create functions in it. The writer of
+    a <application>PL/R</application> function must take care that the function
+    cannot be used to do anything unwanted, since it will be able to do
+    anything that could be done by a user logged in as the database
+    administrator.
+   </para>
+
+   <para>
+    An implementation restriction is that PL/R procedures cannot be used to
+    create input/output functions for new data types.
+   </para>
+
+ </chapter>
+
+ <chapter id="plr-install">
+  <title>Installation</title>
   <para>
-   PL/R is a loadable procedural language that enables you to write
-   PostgreSQL functions in the <ulink
-   url="http://www.r-project.org/">R programming language</ulink>.
+   Place source tar file in <literal>contrib</literal> in the PostgreSQL source
+   tree and untar it. The shared object for the R call handler is built and
+   installed in the PostgreSQL library directory via the following commands
+   (starting from <literal>/path/to/postgresql_source/contrib</literal>):
+   <programlisting>
+    cd plr
+    make
+    make install
+   </programlisting>
   </para>
 
   <note>
    <para>
-    Note: Trigger procedures are not currently supported.
+   PL/R should build cleanly with PostgreSQL 7.3.x. It was developed using libR
+   from R 1.6.2 under Red Hat 7.3 & 8.0.
    </para>
   </note>
 
   <para>
-   To install PL/R in a particular database, use
-   <literal>createlang plr <replaceable>dbname</></literal>. Alternatively
-   you can create the language manually using SQL commands:
+   You can use <literal>plr.sql</literal> (which is created in
+   <literal>contrib/plr</literal>) to create the language and support
+   functions in your database of choice:
+   <programlisting>
+    psql mydatabase < plr.sql
+   </programlisting>
+   Alternatively you can create the language manually using SQL commands:
    <programlisting>
 CREATE FUNCTION plr_call_handler()
 RETURNS LANGUAGE_HANDLER
@@ -38,64 +80,26 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
 
   <tip>
    <para>
-    If a language is installed into <literal>template1</>, all subsequently
-    created databases will have the language installed automatically.
+    If a language is installed into <literal>template1</literal>, all
+    subsequently created databases will have the language installed
+    automatically.
    </para>
   </tip>
 
-  <note>
+  <tip>
    <para>
-    If you build PostgreSQL from source, you must
-    specially enable the build of PL/R during the installation process
-    (refer to the installation instructions for more information).  Users of
-    binary packages might find PL/R in a separate subpackage.
+    In addition to the documentation, the <literal>plr.out</literal> file
+    in <literal>plr/expected</literal> is a good source of usage examples.
    </para>
-  </note>
+  </tip>
 
-  <note>
+  <tip>
    <para>
-    R must have been built with the --enable-R-shlib option when it was
-    configured, in order for the libR shared object library to be available.
+    R must have been built with the <literal>--enable-R-shlib</literal> option
+    when it was configured, in order for the libR shared object library to be
+    available.
    </para>
-  </note>
- </chapter>
-
- <chapter id="plr-overview">
-   <title>Overview</title>
-
-   <para>
-    PL/R offers most (if not all) of the capabilities a function
-    writer has in the R language.
-   </para>
-
-   <para>
-    A restriction is that only a few commands are available to access the
-    database via SPI and to raise messages via <function>elog()</>. There
-    is no way to access internals of the database backend. However the user
-    is able to gain OS-level access under the permissions of the
-    PostgreSQL user ID, as with a C function.
-    Thus, any unprivileged database user should not be permitted to use this
-    language. It <emphasis>must be installed as an untrusted procedural
-    language</emphasis> so that only database superusers can create functions
-    in it. The writer of a <application>PL/R</> function must take care that
-    the function cannot be used to do anything unwanted, since it will be able
-    to do anything that could be done by a user logged in as the database
-    administrator.
-   </para>
-
-   <para>
-    Another implementation restriction is that PL/R procedures cannot
-    be used to create input/output functions for new data types.
-   </para>
-
-   <para>
-    The shared object for the <application>R</> call handler is automatically
-    built and installed in the PostgreSQL library directory if R support is
-    specified during the configuration step of the installation procedure. To
-    install <application>PL/R</> in a particular database, use the 
-    <filename>createlang</filename> script, for example <literal>createlang plr
-    <replaceable>dbname</></literal>.
-   </para>
+  </tip>
  </chapter>
 
  <chapter id="plr-funcs">
