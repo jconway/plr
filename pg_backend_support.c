@@ -1681,7 +1681,7 @@ print_pid(void)
  * The hashkey is returned into the caller-provided storage at *hashkey.
  */
 void
-compute_function_hashkey(FmgrInfo *flinfo,
+compute_function_hashkey(FunctionCallInfo fcinfo,
 						 Form_pg_proc procStruct,
 						 plr_func_hashkey *hashkey)
 {
@@ -1690,7 +1690,16 @@ compute_function_hashkey(FmgrInfo *flinfo,
 	/* Make sure any unused bytes of the struct are zero */
 	MemSet(hashkey, 0, sizeof(plr_func_hashkey));
 
-	hashkey->funcOid = flinfo->fn_oid;
+	/* get function OID */
+	hashkey->funcOid = fcinfo->flinfo->fn_oid;
+
+	/* if trigger, get relation OID */
+	if (CALLED_AS_TRIGGER(fcinfo))
+	{
+		TriggerData *trigdata = (TriggerData *) fcinfo->context;
+
+		hashkey->trigrelOid = RelationGetRelid(trigdata->tg_relation);
+	}
 
 	/* get the argument types */
 	for (i = 0; i < procStruct->pronargs; i++)
@@ -1699,8 +1708,7 @@ compute_function_hashkey(FmgrInfo *flinfo,
 
 		/*
 		 * Check for polymorphic arguments. If found, use the actual
-		 * parameter type from the caller's FuncExpr node, if we
-		 * have one.
+		 * parameter type from the caller's FuncExpr node, if we have one.
 		 *
 		 * We can support arguments of type ANY the same way as normal
 		 * polymorphic arguments.
@@ -1708,7 +1716,7 @@ compute_function_hashkey(FmgrInfo *flinfo,
 		if (argtypeid == ANYARRAYOID || argtypeid == ANYELEMENTOID ||
 			argtypeid == ANYOID)
 		{
-			argtypeid = get_fn_expr_argtype(flinfo, i);
+			argtypeid = get_fn_expr_argtype(fcinfo->flinfo, i);
 			if (!OidIsValid(argtypeid))
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

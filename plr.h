@@ -222,6 +222,15 @@ typedef enum IOFuncSelector
 typedef struct plr_func_hashkey
 {								/* Hash lookup key for functions */
 	Oid		funcOid;
+
+	/*
+	 * For a trigger function, the OID of the relation triggered on is part
+	 * of the hashkey --- we want to compile the trigger separately for each
+	 * relation it is used with, in case the rowtype is different.  Zero if
+	 * not called as a trigger.
+	 */
+	Oid			trigrelOid;
+
 	/*
 	 * We include actual argument types in the hash key to support
 	 * polymorphic PLpgSQL functions.  Be careful that extra positions
@@ -306,7 +315,7 @@ extern Datum plr_array_accum(PG_FUNCTION_ARGS);
 extern Datum plr_environ(PG_FUNCTION_ARGS);
 
 /* Postgres backend support functions */
-extern void compute_function_hashkey(FmgrInfo *flinfo,
+extern void compute_function_hashkey(FunctionCallInfo fcinfo,
 									 Form_pg_proc procStruct,
 									 plr_func_hashkey *hashkey);
 extern void plr_HashTableInit(void);

@@ -663,7 +663,7 @@ compile_plr_function(FunctionCallInfo fcinfo)
 			plr_HashTableInit();
 
 		/* Compute hashkey using function signature and actual arg types */
-		compute_function_hashkey(fcinfo->flinfo, procStruct, &hashkey);
+		compute_function_hashkey(fcinfo, procStruct, &hashkey);
 		hashkey_valid = true;
 
 		/* And do the lookup */
@@ -707,7 +707,7 @@ compile_plr_function(FunctionCallInfo fcinfo)
 		 * the completed function.
 		 */
 		if (!hashkey_valid)
-			compute_function_hashkey(fcinfo->flinfo, procStruct, &hashkey);
+			compute_function_hashkey(fcinfo, procStruct, &hashkey);
 
 		/*
 		 * Do the hard part.
