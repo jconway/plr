@@ -1188,6 +1188,7 @@ get_frame_tuplestore(SEXP rval,
 							Datum					dvalue;
 							
 							MemSet(&fake_fcinfo, 0, sizeof(fake_fcinfo));
+							MemSet(&flinfo, 0, sizeof(flinfo));
 							fake_fcinfo.flinfo = &flinfo;
 							flinfo.fn_mcxt = CurrentMemoryContext;
 							fake_fcinfo.context = NULL;
