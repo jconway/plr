@@ -1,5 +1,0 @@
-#!/bin/bash
-
-jade -c ${DOCBOOKSTYLE}/catalog -d ../../doc/src/sgml/stylesheet.dsl -i output-html -t sgml $1
-
-
