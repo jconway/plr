@@ -128,6 +128,27 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 #define PARSE_ERROR			3
 #define PARSE_EOF			4
 
+
+/*
+ * See the no-exported header file ${R_HOME}/src/include/Startup.h
+ */
+/* Startup Actions */
+typedef enum {
+    SA_NORESTORE,/* = 0 */
+    SA_RESTORE,
+    SA_DEFAULT,/* was === SA_RESTORE */
+    SA_NOSAVE,
+    SA_SAVE,
+    SA_SAVEASK,
+    SA_SUICIDE
+} SA_TYPE;
+
+/*
+ * See the no-exported header file ${R_HOME}/src/unix/Runix.h
+ */
+extern void Rstd_CleanUp(SA_TYPE saveact, int status, int runLast);
+
+
 /* convert C string to text pointer */
 #define PG_TEXT_GET_STR(textp_) \
 	DatumGetCString(DirectFunctionCall1(textout, PointerGetDatum(textp_)))
@@ -284,6 +305,7 @@ extern int Rf_initEmbeddedR(int argc, char **argv);
 
 /* PL/R language handler */
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
+extern void plr_cleanup(void);
 extern void plr_init(void);
 extern void plr_load_modules(MemoryContext plr_SPI_context);
 extern void load_r_cmd(const char *cmd);

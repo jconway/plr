@@ -31,6 +31,7 @@
  * plr.c - Language handler and support functions
  */
 #include "plr.h"
+#include "storage/ipc.h"
 
 /*
  * Global data
@@ -221,6 +222,18 @@ load_r_cmd(const char *cmd)
 }
 
 /*
+ * plr_cleanup() - Let the embedded interpreter clean up after itself
+ *
+ * DO NOT make this static --- it has to be registered as an on_proc_exit()
+ * callback
+ */
+void
+plr_cleanup(void)
+{
+	Rstd_CleanUp(SA_NOSAVE, 0, FALSE);
+}
+
+/*
  * plr_init() - Initialize all that's safe to do in the postmaster
  *
  * DO NOT make this static --- it has to be callable by preload
@@ -247,6 +260,10 @@ plr_init(void)
 
 	rargc = sizeof(rargv)/sizeof(rargv[0]);
 	Rf_initEmbeddedR(rargc, rargv);
+
+	/* arrange for automatic cleanup at proc_exit */
+	on_proc_exit(plr_cleanup, 0);
+
 	plr_pm_init_done = true;
 }
 

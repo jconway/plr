@@ -107,21 +107,8 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
   <tip>
    <para>
     R_HOME must be defined in the environment of the user under which
-    PostgreSQL is started (a.k.a. the administrative user), <emphasis>before
-    </emphasis> the postmaster is started. Otherwise PL/R will refuse to load.
-   </para>
-   <para>
-    Additionally, R_SESSION_TMPDIR may be defined in the environment of
-    the administrative user, also <emphasis>before</emphasis> the postmaster
-    is started. R_SESSION_TMPDIR must specify an existing directory, owned by
-    the administrative user. The R interpreter uses this directory as it
-    performs its tasks. If this environment variable is not defined, the R
-    interpreter will create its own temporary directories (e.g. /tmp/Rtmp12345,
-    where 12345 is the pid of the process creating the directory). A normal
-    command line R session would remove this directory when it exists. However
-    PL/R has no way to know when a PostgreSQL session might end, therefore
-    these temporary directories will accumulate until removed manually
-    or by your OS.
+    PostgreSQL is started, <emphasis>before</emphasis> the postmaster
+    is started. Otherwise PL/R will refuse to load.
    </para>
   </tip>
 
