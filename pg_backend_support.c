@@ -42,6 +42,9 @@
 /* GUC variable */
 extern char *Dynamic_library_path;
 
+/* compiled function hash table */
+extern HTAB *plr_HashTable;
+
 /*
  * static declarations
  */
@@ -52,6 +55,10 @@ static char *find_in_dynamic_libpath(const char *basename);
 static bool file_exists(const char *name);
 
 #ifdef PG_VERSION_73_COMPAT
+/*************************************************************************
+ * working with postgres 7.3 compatible sources
+ *************************************************************************/
+
 ArrayType *
 construct_md_array(Datum *elems,
 				   int ndims,
@@ -99,18 +106,279 @@ get_fn_expr_rettype(FunctionCallInfo fcinfo)
 	return get_func_rettype(fcinfo->flinfo->fn_oid);
 }
 
+/*
+ * get_element_type
+ *
+ *		Given the type OID, get the typelem (InvalidOid if not an array type).
+ *
+ * NB: this only considers varlena arrays to be true arrays; InvalidOid is
+ * returned if the input is a fixed-length array type.
+ */
+Oid
+get_element_type(Oid typid)
+{
+	HeapTuple	tp;
+
+	tp = SearchSysCache(TYPEOID,
+						ObjectIdGetDatum(typid),
+						0, 0, 0);
+	if (HeapTupleIsValid(tp))
+	{
+		Form_pg_type typtup = (Form_pg_type) GETSTRUCT(tp);
+		Oid			result;
+
+		if (typtup->typlen == -1)
+			result = typtup->typelem;
+		else
+			result = InvalidOid;
+		ReleaseSysCache(tp);
+		return result;
+	}
+	else
+		return InvalidOid;
+}
+
+/*
+ * get_array_type
+ *
+ *		Given the type OID, get the corresponding array type.
+ *		Returns InvalidOid if no array type can be found.
+ *
+ * NB: this only considers varlena arrays to be true arrays.
+ */
+Oid
+get_array_type(Oid typid)
+{
+	HeapTuple	tp;
+
+	tp = SearchSysCache(TYPEOID,
+						ObjectIdGetDatum(typid),
+						0, 0, 0);
+	if (HeapTupleIsValid(tp))
+	{
+		Form_pg_type typtup = (Form_pg_type) GETSTRUCT(tp);
+		char	   *array_typename;
+		Oid			namespaceId;
+
+		array_typename = makeArrayTypeName(NameStr(typtup->typname));
+		namespaceId = typtup->typnamespace;
+		ReleaseSysCache(tp);
+
+		tp = SearchSysCache(TYPENAMENSP,
+							PointerGetDatum(array_typename),
+							ObjectIdGetDatum(namespaceId),
+							0, 0);
+
+		pfree(array_typename);
+
+		if (HeapTupleIsValid(tp))
+		{
+			Oid			result;
+
+			typtup = (Form_pg_type) GETSTRUCT(tp);
+			if (typtup->typlen == -1 && typtup->typelem == typid)
+				result = HeapTupleGetOid(tp);
+			else
+				result = InvalidOid;
+			ReleaseSysCache(tp);
+			return result;
+		}
+	}
+	return InvalidOid;
+}
+
+/*
+ * get_type_io_data
+ *
+ *		A six-fer:	given the type OID, return typlen, typbyval, typalign,
+ *					typdelim, typelem, and IO function OID. The IO function
+ *					returned is controlled by IOFuncSelector
+ */
+void
+get_type_io_data(Oid typid,
+				 IOFuncSelector which_func,
+				 int16 *typlen,
+				 bool *typbyval,
+				 char *typalign,
+				 char *typdelim,
+				 Oid *typelem,
+				 Oid *func)
+{
+	HeapTuple	typeTuple;
+	Form_pg_type typeStruct;
+
+	typeTuple = SearchSysCache(TYPEOID,
+							   ObjectIdGetDatum(typid),
+							   0, 0, 0);
+	if (!HeapTupleIsValid(typeTuple))
+		elog(ERROR, "cache lookup failed for type %u", typid);
+	typeStruct = (Form_pg_type) GETSTRUCT(typeTuple);
+
+	*typlen = typeStruct->typlen;
+	*typbyval = typeStruct->typbyval;
+	*typalign = typeStruct->typalign;
+	*typdelim = typeStruct->typdelim;
+	*typelem = typeStruct->typelem;
+	switch (which_func)
+	{
+		case IOFunc_input:
+			*func = typeStruct->typinput;
+			break;
+		case IOFunc_output:
+			*func = typeStruct->typoutput;
+			break;
+		case IOFunc_receive:
+			*func = typeStruct->typreceive;
+			break;
+		case IOFunc_send:
+			*func = typeStruct->typsend;
+			break;
+	}
+	ReleaseSysCache(typeTuple);
+}
+
+
+/*-------------------------------------------------------------------------
+ *		Support routines for extracting info from fn_expr parse tree
+ *
+ * These are needed by polymorphic functions, which accept multiple possible
+ * input types and need help from the parser to know what they've got.
+ *-------------------------------------------------------------------------
+ */
+
+/*
+ * This just returns InvalidOid because in 7.3.x information is not available
+ */
+Oid
+get_fn_expr_rettype(FmgrInfo *flinfo)
+{
+	return InvalidOid;
+}
+
+/*
+ * This just returns InvalidOid because in 7.3.x information is not available
+ */
+Oid
+get_fn_expr_argtype(FmgrInfo *flinfo, int argnum)
+{
+	return InvalidOid;
+}
+
+
+#else
+/*************************************************************************
+ * working with postgres 7.4 compatible sources
+ *************************************************************************/
+
+
 #endif /* PG_VERSION_73_COMPAT */
 
 /*
- * isArrayTypeName(typeName)
- *	  - given a type name determine if it is an array type name
- * 
- * this must be kept consistent with makeArrayTypeName() above
+ * Compute the hashkey for a given function invocation
+ *
+ * The hashkey is returned into the caller-provided storage at *hashkey.
  */
-bool
-isArrayTypeName(const char *typeName)
+void
+compute_function_hashkey(FmgrInfo *flinfo,
+						 Form_pg_proc procStruct,
+						 plr_func_hashkey *hashkey)
 {
-	return (typeName[0] == '_');
+	int		i;
+
+	/* Make sure any unused bytes of the struct are zero */
+	MemSet(hashkey, 0, sizeof(plr_func_hashkey));
+
+	hashkey->funcOid = flinfo->fn_oid;
+
+	/* get the argument types */
+	for (i = 0; i < procStruct->pronargs; i++)
+	{
+		Oid			argtypeid = procStruct->proargtypes[i];
+
+		/*
+		 * Check for polymorphic arguments. If found, use the actual
+		 * parameter type from the caller's FuncExpr node, if we
+		 * have one.
+		 *
+		 * We can support arguments of type ANY the same way as normal
+		 * polymorphic arguments.
+		 */
+		if (argtypeid == ANYARRAYOID || argtypeid == ANYELEMENTOID ||
+			argtypeid == ANYOID)
+		{
+			argtypeid = get_fn_expr_argtype(flinfo, i);
+			if (!OidIsValid(argtypeid))
+				elog(ERROR, "could not determine actual argument "
+					 "type for polymorphic function %s",
+					 NameStr(procStruct->proname));
+		}
+
+		hashkey->argtypes[i] = argtypeid;
+	}
+}
+
+void
+plr_HashTableInit(void)
+{
+	HASHCTL		ctl;
+
+	memset(&ctl, 0, sizeof(ctl));
+	ctl.keysize = sizeof(plr_func_hashkey);
+	ctl.entrysize = sizeof(plr_HashEnt);
+	ctl.hash = tag_hash;
+	plr_HashTable = hash_create("PLR function cache",
+								FUNCS_PER_USER,
+								&ctl,
+								HASH_ELEM | HASH_FUNCTION);
+}
+
+plr_function *
+plr_HashTableLookup(plr_func_hashkey *func_key)
+{
+	plr_HashEnt	   *hentry;
+
+	hentry = (plr_HashEnt*) hash_search(plr_HashTable,
+										(void *) func_key,
+										HASH_FIND,
+										NULL);
+	if (hentry)
+		return hentry->function;
+	else
+		return (plr_function *) NULL;
+}
+
+void
+plr_HashTableInsert(plr_function *function,
+					plr_func_hashkey *func_key)
+{
+	plr_HashEnt	   *hentry;
+	bool			found;
+
+	hentry = (plr_HashEnt*) hash_search(plr_HashTable,
+										(void *) func_key,
+										HASH_ENTER,
+										&found);
+	if (hentry == NULL)
+		elog(ERROR, "out of memory in plr_HashTable");
+	if (found)
+		elog(WARNING, "trying to insert a function that exists");
+
+	hentry->function = function;
+	/* prepare back link from function to hashtable key */
+	function->fn_hashkey = &hentry->key;
+}
+
+void
+plr_HashTableDelete(plr_function *function)
+{
+	plr_HashEnt	   *hentry;
+
+	hentry = (plr_HashEnt*) hash_search(plr_HashTable,
+										(void *) function->fn_hashkey,
+										HASH_REMOVE,
+										NULL);
+	if (hentry == NULL)
+		elog(WARNING, "trying to delete function that does not exist");
 }
 
 static char *
@@ -183,59 +451,6 @@ perm_fmgr_info(Oid functionId, FmgrInfo *finfo)
 {
 	fmgr_info_cxt(functionId, finfo, TopMemoryContext);
 	INIT_AUX_FMGR_ATTS;
-}
-
-void
-system_cache_lookup(Oid element_type,
-					bool input,
-					int *typlen,
-					bool *typbyval,
-					char *typdelim,
-					Oid *typelem,
-					Oid *proc,
-					char *typalign)
-{
-	HeapTuple	typeTuple;
-	Form_pg_type typeStruct;
-
-	typeTuple = SearchSysCache(TYPEOID,
-							   ObjectIdGetDatum(element_type),
-							   0, 0, 0);
-	if (!HeapTupleIsValid(typeTuple))
-		elog(ERROR, "cache lookup failed for type %u", element_type);
-	typeStruct = (Form_pg_type) GETSTRUCT(typeTuple);
-
-	*typlen = typeStruct->typlen;
-	*typbyval = typeStruct->typbyval;
-	*typdelim = typeStruct->typdelim;
-	*typelem = typeStruct->typelem;
-	*typalign = typeStruct->typalign;
-	if (input)
-		*proc = typeStruct->typinput;
-	else
-		*proc = typeStruct->typoutput;
-	ReleaseSysCache(typeTuple);
-}
-
-Oid
-get_typelem(Oid element_type)
-{
-	Oid				typelem;
-	HeapTuple		typeTuple;
-	Form_pg_type	typeStruct;
-
-	typeTuple = SearchSysCache(TYPEOID,
-							   ObjectIdGetDatum(element_type),
-							   0, 0, 0);
-	if (!HeapTupleIsValid(typeTuple))
-		elog(ERROR, "cache lookup failed for type %u", element_type);
-	typeStruct = (Form_pg_type) GETSTRUCT(typeTuple);
-
-	typelem = typeStruct->typelem;
-
-	ReleaseSysCache(typeTuple);
-
-	return typelem;
 }
 
 static bool

@@ -288,7 +288,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 
 		for (i = 0; i < nargs; i++)
 		{
-			int			typlen;
+			int16		typlen;
 			bool		typbyval;
 			char		typdelim;
 			Oid			typinput,
@@ -301,8 +301,8 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 			/* switch to long lived context to create plan description elements */
 			oldcontext = MemoryContextSwitchTo(TopMemoryContext);
 
-			system_cache_lookup(typeids[i], true, &typlen, &typbyval,
-						&typdelim, &typelem, &typinput, &typalign);
+			get_type_io_data(typeids[i], IOFunc_input, &typlen, &typbyval,
+							 &typalign, &typdelim, &typelem, &typinput);
 			typelems[i] = typelem;
 
 			MemoryContextSwitchTo(oldcontext);

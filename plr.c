@@ -36,17 +36,20 @@
  * Global data
  */
 MemoryContext plr_SPI_context;
+HTAB *plr_HashTable = (HTAB *) NULL;
 
 static bool plr_firstcall = true;
 static bool	plr_interp_started = false;
 static FunctionCallInfo plr_current_fcinfo = NULL;
-static HTAB *plr_HashTable;
+static char *plr_error_funcname;
 
 /*
  * defines
  */
-#define MAX_PRONAME_LEN		64
-#define FUNCS_PER_USER		64
+
+/* real max is 3 (for "PLR") plus number of characters in an Oid */
+#define MAX_PRONAME_LEN		NAMEDATALEN
+
 #define OPTIONS_NULL_CMD	"options(error = expression(NULL))"
 #define THROWNOTICE_CMD \
 			"pg.thrownotice <-function(msg) " \
@@ -145,56 +148,8 @@ static HTAB *plr_HashTable;
 #define REVAL \
 			"pg.reval <- function(arg1) {eval(parse(text = arg1))}"
 
-/* hash table support */
-#define plr_HashTableLookup(PRODESCNAME, PRODESC) \
-do { \
-	plr_HashEnt *hentry; char key[MAX_PRONAME_LEN]; \
-	\
-	MemSet(key, 0, MAX_PRONAME_LEN); \
-	snprintf(key, MAX_PRONAME_LEN - 1, "%s", PRODESCNAME); \
-	hentry = (plr_HashEnt*) hash_search(plr_HashTable, \
-										 key, HASH_FIND, NULL); \
-	if (hentry) \
-		PRODESC = hentry->prodesc; \
-	else \
-		PRODESC = NULL; \
-} while(0)
-
-#define plr_HashTableInsert(PRODESC) \
-do { \
-	plr_HashEnt *hentry; bool found; char key[MAX_PRONAME_LEN]; \
-	\
-	MemSet(key, 0, MAX_PRONAME_LEN); \
-	snprintf(key, MAX_PRONAME_LEN - 1, "%s", PRODESC->proname); \
-	hentry = (plr_HashEnt*) hash_search(plr_HashTable, \
-										 key, HASH_ENTER, &found); \
-	if (hentry == NULL) \
-		elog(ERROR, "out of memory in plr_HashTable"); \
-	if (found) \
-		elog(WARNING, "trying to insert a function name that exists."); \
-	hentry->prodesc = PRODESC; \
-} while(0)
-
-#define plr_HashTableDelete(PRODESCNAME) \
-do { \
-	plr_HashEnt *hentry; char key[MAX_PRONAME_LEN]; \
-	\
-	MemSet(key, 0, MAX_PRONAME_LEN); \
-	snprintf(key, MAX_PRONAME_LEN - 1, "%s", PRODESCNAME); \
-	hentry = (plr_HashEnt*) hash_search(plr_HashTable, \
-										 key, HASH_REMOVE, NULL); \
-	if (hentry == NULL) \
-		elog(WARNING, "trying to delete function name that does not exist."); \
-} while(0)
-
 #define CurrentTriggerData ((TriggerData *) fcinfo->context)
 
-/* hash table */
-typedef struct plr_hashent
-{
-	char			internal_proname[MAX_PRONAME_LEN];
-	plr_proc_desc  *prodesc;
-} plr_HashEnt;
 
 /*
  * static declarations
@@ -203,10 +158,13 @@ static void plr_init_interp(Oid funcid);
 static void plr_init_all(Oid funcid);
 static HeapTuple plr_trigger_handler(PG_FUNCTION_ARGS);
 static Datum plr_func_handler(PG_FUNCTION_ARGS);
-static plr_proc_desc *compile_plr_function(FunctionCallInfo fcinfo, bool is_trigger);
-static plr_proc_desc *get_prodesc_by_name(char *name);
+static plr_function *compile_plr_function(FunctionCallInfo fcinfo);
+static plr_function *do_compile(FunctionCallInfo fcinfo,
+							    HeapTuple procTup,
+							    plr_func_hashkey *hashkey);
 static SEXP plr_parse_func_body(const char *body);
-static SEXP plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo);
+static SEXP plr_convertargs(plr_function *function, FunctionCallInfo fcinfo);
+static void plr_error_callback(void *arg);
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -445,23 +403,12 @@ plr_init_load_modules(MemoryContext	plr_SPI_context)
 static void
 plr_init_all(Oid funcid)
 {
-	HASHCTL		ctl;
 	MemoryContext		oldcontext;
 
 	/* everything initialized needs to live until/unless we explicitly delete it */
 	oldcontext = MemoryContextSwitchTo(TopMemoryContext);
 
-	/* set up the functions caching hash table */
-	ctl.keysize = MAX_PRONAME_LEN;
-	ctl.entrysize = sizeof(plr_HashEnt);
-
-	/*
-	 * use FUNCS_PER_USER, defined above as a guess of how
-	 * many hash table entries to create, initially
-	 */
-	plr_HashTable = hash_create("plr hash", FUNCS_PER_USER, &ctl, HASH_ELEM);
-
-	/* now initialize EmbeddedR */
+	/* initialize EmbeddedR */
 	plr_init_interp(funcid);
 
 	plr_firstcall = false;
@@ -481,18 +428,22 @@ plr_trigger_handler(PG_FUNCTION_ARGS)
 static Datum
 plr_func_handler(PG_FUNCTION_ARGS)
 {
-	plr_proc_desc  *prodesc;
+	plr_function  *function;
 	SEXP			fun;
 	SEXP			rargs;
 	SEXP			rvalue;
 	Datum			retval;
+	ERRORCONTEXTCALLBACK;
 
 	/* Find or compile the function */
-	prodesc = compile_plr_function(fcinfo, false);
-	PROTECT(fun = prodesc->fun);
+	function = compile_plr_function(fcinfo);
+
+	PUSH_PLERRCONTEXT;
+
+	PROTECT(fun = function->fun);
 
 	/* Convert all call arguments */
-	PROTECT(rargs = plr_convertargs(prodesc, fcinfo));
+	PROTECT(rargs = plr_convertargs(function, fcinfo));
 
 	/* Call the R function */
 	PROTECT(rvalue = call_r_func(fun, rargs));
@@ -501,320 +452,418 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	 * Convert the return value from an R object to a Datum.
 	 * We expect r_get_pg to do the right thing with missing or empty results.
 	 */
-	retval = r_get_pg(rvalue, prodesc, fcinfo);
+	retval = r_get_pg(rvalue, function, fcinfo);
 
+	POP_PLERRCONTEXT;
 	UNPROTECT(3);
 
 	return retval;
 }
 
-/*
- * compile_plr_function	- compile (or hopefully just look up) function
+
+/* ----------
+ * compile_plr_function
+ *
+ * Note: it's important for this to fall through quickly if the function
+ * has already been compiled.
+ * ----------
  */
-static plr_proc_desc *
-compile_plr_function(FunctionCallInfo fcinfo, bool is_trigger)
+plr_function *
+compile_plr_function(FunctionCallInfo fcinfo)
 {
-	Oid				fn_oid = fcinfo->flinfo->fn_oid;
-	HeapTuple		procTup;
-	Form_pg_proc	procStruct;
-	char			internal_proname[MAX_PRONAME_LEN];
-	plr_proc_desc  *prodesc = NULL;
-	char		   *proname;
-	Oid				result_typid;
-	int				nargs;
-	Oid				arg_typid[FUNC_MAX_ARGS];
-
-	/* We'll need the pg_proc tuple in any case... */
-	procTup = SearchSysCache(PROCOID,
-							 ObjectIdGetDatum(fn_oid),
-							 0, 0, 0);
-	if (!HeapTupleIsValid(procTup))
-		elog(ERROR, "plr: cache lookup for proc %u failed", fn_oid);
-	procStruct = (Form_pg_proc) GETSTRUCT(procTup);
-
-	/* grab the function name */
-	proname = NameStr(procStruct->proname);
-
-	/* get the functions return type */
-	GET_PRORETTYPE(result_typid);
-
-	/* get the number and type of arguments */
-	GET_PROARGS(nargs, arg_typid);
-
-	/* Build our internal proc name from the functions Oid */
-	sprintf(internal_proname, "PLR%u", fn_oid);
-
-	/* Lookup the prodesc in the hashtable based on internal_proname */
-	prodesc = get_prodesc_by_name(internal_proname);
+	Oid					funcOid = fcinfo->flinfo->fn_oid;
+	HeapTuple			procTup;
+	Form_pg_proc		procStruct;
+	plr_function	   *function;
+	plr_func_hashkey	hashkey;
+	bool				hashkey_valid = false;
+	ERRORCONTEXTCALLBACK;
 
 	/*
-	 * If it's present, must check whether it's still up to date.
-	 * This is needed because CREATE OR REPLACE FUNCTION can modify the
-	 * function's pg_proc entry without changing its OID.
+	 * Lookup the pg_proc tuple by Oid; we'll need it in any case
 	 */
-	if (prodesc != NULL)
+	procTup = SearchSysCache(PROCOID,
+							 ObjectIdGetDatum(funcOid),
+							 0, 0, 0);
+	if (!HeapTupleIsValid(procTup))
+		elog(ERROR, "plpgsql: cache lookup for proc %u failed", funcOid);
+	procStruct = (Form_pg_proc) GETSTRUCT(procTup);
+
+	/*
+	 * grab copy of the function name into global variable for error callback
+	 */
+	plr_error_funcname = pstrdup(NameStr(procStruct->proname));
+	PUSH_PLERRCONTEXT;
+
+	/*
+	 * See if there's already a cache entry for the current FmgrInfo.
+	 * If not, try to find one in the hash table.
+	 */
+	function = (plr_function *) fcinfo->flinfo->fn_extra;
+
+	if (!function)
 	{
-		bool		uptodate;
+		/* First time through in this backend?  If so, init hashtable */
+		if (!plr_HashTable)
+			plr_HashTableInit();
 
-		uptodate = (prodesc->fn_xmin == HeapTupleHeaderGetXmin(procTup->t_data) &&
-			prodesc->fn_cmin == HeapTupleHeaderGetCmin(procTup->t_data));
+		/* Compute hashkey using function signature and actual arg types */
+		compute_function_hashkey(fcinfo->flinfo, procStruct, &hashkey);
+		hashkey_valid = true;
 
-		CHECK_POLYMORPHIC_TYPES;
+		/* And do the lookup */
+		function = plr_HashTableLookup(&hashkey);
+	}
 
-		if (!uptodate)
+	if (function)
+	{
+		/* We have a compiled function, but is it still valid? */
+		if (!(function->fn_xmin == HeapTupleHeaderGetXmin(procTup->t_data) &&
+			  function->fn_cmin == HeapTupleHeaderGetCmin(procTup->t_data)))
 		{
-			/* delete the hash table entry */
-			plr_HashTableDelete(prodesc->proname);
+			/*
+			 * Nope, drop the hashtable entry.  XXX someday, free all the
+			 * subsidiary storage as well.
+			 */
+			plr_HashTableDelete(function);
 
-			/* clear out prodesc */
-			xpfree(prodesc->proname);
-			R_ReleaseObject(prodesc->fun);
-			xpfree(prodesc);
+			/* free some of the subsidiary storage */
+			xpfree(function->proname);
+			R_ReleaseObject(function->fun);
+			xpfree(function);
+
+			function = NULL;
 		}
 	}
 
 	/*
-	 * If we haven't found it in the hashtable, or we invalidated it,
-	 * we analyze the functions arguments and returntype and store
-	 * the in-/out-functions in the prodesc block and create
-	 * a new hashtable entry for it.
-	 *
-	 * Then we load the procedure into the R interpreter.
+	 * If the function wasn't found or was out-of-date, we have to compile it
 	 */
-	if (prodesc == NULL)
+	if (!function)
 	{
-		HeapTuple			langTup;
-		HeapTuple			typeTup;
-		Form_pg_language	langStruct;
-		Form_pg_type		typeStruct;
-		StringInfo			proc_internal_def = makeStringInfo();
-		StringInfo			proc_internal_args = makeStringInfo();
-		char		 	   *proc_source;
-		MemoryContext		oldcontext;
-
-		/* the prodesc structure needs to live until we explicitly delete it */
-		oldcontext = MemoryContextSwitchTo(TopMemoryContext);
-
-		/* Allocate a new procedure description block */
-		prodesc = (plr_proc_desc *) palloc(sizeof(plr_proc_desc));
-		if (prodesc == NULL)
-			elog(ERROR, "plr: out of memory");
-		MemSet(prodesc, 0, sizeof(plr_proc_desc));
-
-		prodesc->proname = pstrdup(internal_proname);
-		prodesc->fn_xmin = HeapTupleHeaderGetXmin(procTup->t_data);
-		prodesc->fn_cmin = HeapTupleHeaderGetCmin(procTup->t_data);
-
-		/* Lookup the pg_language tuple by Oid*/
-		langTup = SearchSysCache(LANGOID,
-								 ObjectIdGetDatum(procStruct->prolang),
-								 0, 0, 0);
-		if (!HeapTupleIsValid(langTup))
-		{
-			xpfree(prodesc->proname);
-			xpfree(prodesc);
-			elog(ERROR, "plr: cache lookup for language %u failed",
-				 procStruct->prolang);
-		}
-		langStruct = (Form_pg_language) GETSTRUCT(langTup);
-		prodesc->lanpltrusted = langStruct->lanpltrusted;
-		ReleaseSysCache(langTup);
+		/*
+		 * Calculate hashkey if we didn't already; we'll need it to store
+		 * the completed function.
+		 */
+		if (!hashkey_valid)
+			compute_function_hashkey(fcinfo->flinfo, procStruct, &hashkey);
 
 		/*
-		 * Get the required information for input conversion of the
-		 * return value.
+		 * Do the hard part.
 		 */
-		if (!is_trigger)
-		{
-			prodesc->result_typid = result_typid;
-			typeTup = SearchSysCache(TYPEOID,
-								ObjectIdGetDatum(result_typid),
-									 0, 0, 0);
-			if (!HeapTupleIsValid(typeTup))
-			{
-				xpfree(prodesc->proname);
-				xpfree(prodesc);
-				elog(ERROR, "plr: cache lookup for return type %u failed",
-					 procStruct->prorettype);
-			}
-			typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
-
-			CHECK_RETURN_PSEUDOTYPES;
-
-			if (typeStruct->typrelid != InvalidOid ||
-				procStruct->prorettype == RECORDOID)
-				prodesc->result_istuple = true;
-
-			perm_fmgr_info(typeStruct->typinput, &(prodesc->result_in_func));
-
-			/* is return type an array? */
-			if (isArrayTypeName(NameStr(typeStruct->typname)))
-				prodesc->result_elem = typeStruct->typelem;
-			else	/* not ant array */
-				prodesc->result_elem = 0;
-
-			ReleaseSysCache(typeTup);
-
-			/*
-			 * if we have an array type, get the element type's in_func
-			 */
-			if (prodesc->result_elem != 0)
-			{
-				int			typlen;
-				bool		typbyval;
-				char		typdelim;
-				Oid			typinput,
-							typelem;
-				FmgrInfo	inputproc;
-				char		typalign;
-
-				system_cache_lookup(prodesc->result_elem, true, &typlen, &typbyval,
-									&typdelim, &typelem, &typinput, &typalign);
-				perm_fmgr_info(typinput, &inputproc);
-
-				prodesc->result_elem_in_func = inputproc;
-				prodesc->result_elem_typbyval = typbyval;
-				prodesc->result_elem_typlen = typlen;
-				prodesc->result_elem_typalign = typalign;
-			}
-		}
-
-		/*
-		 * Get the required information for output conversion
-		 * of all procedure arguments
-		 */
-		if (!is_trigger)
-		{
-			int		i;
-
-			prodesc->nargs = nargs;
-			for (i = 0; i < nargs; i++)
-			{
-				prodesc->arg_typid[i] = arg_typid[i];
-
-				typeTup = SearchSysCache(TYPEOID,
-							ObjectIdGetDatum(arg_typid[i]),
-										 0, 0, 0);
-				if (!HeapTupleIsValid(typeTup))
-				{
-					xpfree(prodesc->proname);
-					xpfree(prodesc);
-					elog(ERROR, "plr: cache lookup for argument type %u failed",
-						 prodesc->arg_typid[i]);
-				}
-				typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
-
-				CHECK_ARG_PSEUDOTYPES;
-
-				if (typeStruct->typrelid != InvalidOid)
-					prodesc->arg_is_rel[i] = 1;
-				else
-					prodesc->arg_is_rel[i] = 0;
-
-				perm_fmgr_info(typeStruct->typoutput, &(prodesc->arg_out_func[i]));
-
-				/* is argument an array? */
-				if (isArrayTypeName(NameStr(typeStruct->typname)))
-					prodesc->arg_elem[i] = typeStruct->typelem;
-				else	/* not ant array */
-					prodesc->arg_elem[i] = 0;
-
-				if (i > 0)
-					appendStringInfo(proc_internal_args, ",");
-				appendStringInfo(proc_internal_args, "arg%d", i + 1);
-
-				ReleaseSysCache(typeTup);
-
-				if (prodesc->arg_elem[i] != 0)
-				{
-					int			typlen;
-					bool		typbyval;
-					char		typdelim;
-					Oid			typoutput,
-								typelem;
-					FmgrInfo	outputproc;
-					char		typalign;
-
-					system_cache_lookup(prodesc->arg_elem[i], false, &typlen, &typbyval,
-										&typdelim, &typelem, &typoutput, &typalign);
-					perm_fmgr_info(typoutput, &outputproc);
-
-					prodesc->arg_elem_out_func[i] = outputproc;
-					prodesc->arg_elem_typbyval[i] = typbyval;
-					prodesc->arg_elem_typlen[i] = typlen;
-					prodesc->arg_elem_typalign[i] = typalign;
-				}
-			}
-		}
-		else
-		{
-			/* trigger procedure has fixed args */
-			appendStringInfo(proc_internal_args,
-				"TGname,TGrelid,TGrelatts,TGwhen,TGlevel,TGop,TGnew,TGold,args");
-		}
-
-		/*
-		 * Create the R command to define the internal
-		 * procedure
-		 */
-		appendStringInfo(proc_internal_def,
-						 "%s <- function(%s) {",
-						 internal_proname,
-						 proc_internal_args->data);
-
-		/* Add user's function definition to proc body */
-		proc_source = DatumGetCString(DirectFunctionCall1(textout,
-								  PointerGetDatum(&procStruct->prosrc)));
-
-		appendStringInfo(proc_internal_def, "%s}", proc_source);
-
-		/* parse or find the R function */
-		if(proc_source && proc_source[0])
-			prodesc->fun = plr_parse_func_body(proc_internal_def->data);
-		else
-			prodesc->fun = Rf_findFun(Rf_install(proname), R_GlobalEnv);
-
-		R_PreserveObject(prodesc->fun);
-
-		pfree(proc_source);
-		freeStringInfo(proc_internal_def);
-
-		/* test that this is really a function. */
-		if(prodesc->fun == R_NilValue)
-		{
-			xpfree(prodesc->proname);
-			xpfree(prodesc);
-			elog(ERROR, "plr: cannot create internal procedure %s",
-				 internal_proname);
-		}
-
-		/* Add the proc description block to the hashtable */
-		plr_HashTableInsert(prodesc);
-
-		/* switch back to the context we were called with */
-		MemoryContextSwitchTo(oldcontext);
+		function = do_compile(fcinfo, procTup, &hashkey);
 	}
 
 	ReleaseSysCache(procTup);
 
-	return prodesc;
+	/*
+	 * Save pointer in FmgrInfo to avoid search on subsequent calls
+	 */
+	fcinfo->flinfo->fn_extra = (void *) function;
+
+	POP_PLERRCONTEXT;
+
+	/*
+	 * Finally return the compiled function
+	 */
+	return function;
 }
 
+
 /*
- * get_prodesc_by_name
- *		Returns a prodesc given a proname, or NULL if name not found.
+ * This is the slow part of compile_plr_function().
  */
-static plr_proc_desc *
-get_prodesc_by_name(char *name)
+static plr_function *
+do_compile(FunctionCallInfo fcinfo,
+		   HeapTuple procTup,
+		   plr_func_hashkey *hashkey)
 {
-	plr_proc_desc *prodesc;
+	Form_pg_proc		procStruct = (Form_pg_proc) GETSTRUCT(procTup);
+	bool				is_trigger = CALLED_AS_TRIGGER(fcinfo) ? true : false;
+	plr_function	   *function = NULL;
 
-	if (PointerIsValid(name))
-		plr_HashTableLookup(name, prodesc);
+	Oid						fn_oid = fcinfo->flinfo->fn_oid;
+	char					internal_proname[MAX_PRONAME_LEN];
+	char				   *proname;
+	Oid						result_typid;
+	HeapTuple				langTup;
+	HeapTuple				typeTup;
+	Form_pg_language		langStruct;
+	Form_pg_type			typeStruct;
+	StringInfo				proc_internal_def = makeStringInfo();
+	StringInfo				proc_internal_args = makeStringInfo();
+	char				   *proc_source;
+	MemoryContext			oldcontext;
+
+	/* grab the function name */
+	proname = NameStr(procStruct->proname);
+
+	/* Build our internal proc name from the functions Oid */
+	sprintf(internal_proname, "PLR%u", fn_oid);
+
+	/*
+	 * analyze the functions arguments and returntype and store
+	 * the in-/out-functions in the function block and create
+	 * a new hashtable entry for it.
+	 *
+	 * Then load the procedure into the R interpreter.
+	 */
+
+	/* the function structure needs to live until we explicitly delete it */
+	oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+
+	/* Allocate a new procedure description block */
+	function = (plr_function *) palloc(sizeof(plr_function));
+	if (function == NULL)
+		elog(ERROR, "plr: out of memory");
+	MemSet(function, 0, sizeof(plr_function));
+
+	function->proname = pstrdup(internal_proname);
+	function->fn_xmin = HeapTupleHeaderGetXmin(procTup->t_data);
+	function->fn_cmin = HeapTupleHeaderGetCmin(procTup->t_data);
+
+	/* Lookup the pg_language tuple by Oid*/
+	langTup = SearchSysCache(LANGOID,
+							 ObjectIdGetDatum(procStruct->prolang),
+							 0, 0, 0);
+	if (!HeapTupleIsValid(langTup))
+	{
+		xpfree(function->proname);
+		xpfree(function);
+		elog(ERROR, "plr: cache lookup for language %u failed",
+			 procStruct->prolang);
+	}
+	langStruct = (Form_pg_language) GETSTRUCT(langTup);
+	function->lanpltrusted = langStruct->lanpltrusted;
+	ReleaseSysCache(langTup);
+
+	/* get the functions return type */
+	if (procStruct->prorettype == ANYARRAYOID ||
+		procStruct->prorettype == ANYELEMENTOID)
+	{
+		result_typid = get_fn_expr_rettype(fcinfo->flinfo);
+		if (result_typid == InvalidOid)
+			result_typid = procStruct->prorettype;
+	}
 	else
-		prodesc = NULL;
+		result_typid = procStruct->prorettype;
 
-	return prodesc;
+	/*
+	 * Get the required information for input conversion of the
+	 * return value.
+	 */
+	if (!is_trigger)
+	{
+		function->result_typid = result_typid;
+		typeTup = SearchSysCache(TYPEOID,
+								 ObjectIdGetDatum(function->result_typid),
+								 0, 0, 0);
+		if (!HeapTupleIsValid(typeTup))
+		{
+			xpfree(function->proname);
+			xpfree(function);
+			elog(ERROR, "plr: cache lookup for return type %u failed",
+				 procStruct->prorettype);
+		}
+		typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
+
+		/* Disallow pseudotype return type except VOID or RECORD */
+		/* (note we already replaced ANYARRAY/ANYELEMENT) */
+		if (typeStruct->typtype == 'p')
+		{
+			if (procStruct->prorettype == VOIDOID ||
+				procStruct->prorettype == RECORDOID)
+				 /* okay */ ;
+			else if (procStruct->prorettype == TRIGGEROID)
+			{
+				xpfree(function->proname);
+				xpfree(function);
+				elog(ERROR, "plr functions cannot return type %s"
+					 "\n\texcept when used as triggers",
+					 format_type_be(procStruct->prorettype));
+			}
+			else
+			{
+				xpfree(function->proname);
+				xpfree(function);
+				elog(ERROR, "plr functions cannot return type %s",
+					 format_type_be(procStruct->prorettype));
+			}
+		}
+
+		if (typeStruct->typrelid != InvalidOid ||
+			procStruct->prorettype == RECORDOID)
+			function->result_istuple = true;
+
+		perm_fmgr_info(typeStruct->typinput, &(function->result_in_func));
+
+		/* is return type an array? */
+		if (OidIsValid(get_element_type(function->result_typid)))
+			function->result_elem = typeStruct->typelem;
+		else	/* not ant array */
+			function->result_elem = InvalidOid;
+
+		ReleaseSysCache(typeTup);
+
+		/*
+		 * if we have an array type, get the element type's in_func
+		 */
+		if (function->result_elem != InvalidOid)
+		{
+			int16		typlen;
+			bool		typbyval;
+			char		typdelim;
+			Oid			typinput,
+						typelem;
+			FmgrInfo	inputproc;
+			char		typalign;
+
+			get_type_io_data(function->result_elem, IOFunc_input,
+									 &typlen, &typbyval, &typalign,
+									 &typdelim, &typelem, &typinput);
+
+			perm_fmgr_info(typinput, &inputproc);
+
+			function->result_elem_in_func = inputproc;
+			function->result_elem_typbyval = typbyval;
+			function->result_elem_typlen = typlen;
+			function->result_elem_typalign = typalign;
+		}
+	}
+
+	/*
+	 * Get the required information for output conversion
+	 * of all procedure arguments
+	 */
+	if (!is_trigger)
+	{
+		int		i;
+
+		function->nargs = procStruct->pronargs;
+		for (i = 0; i < function->nargs; i++)
+		{
+			/*
+			 * Since we already did the replacement of polymorphic
+			 * argument types by actual argument types while computing
+			 * the hashkey, we can just use those results.
+			 */
+			function->arg_typid[i] = hashkey->argtypes[i];
+
+			typeTup = SearchSysCache(TYPEOID,
+						ObjectIdGetDatum(function->arg_typid[i]),
+									 0, 0, 0);
+			if (!HeapTupleIsValid(typeTup))
+			{
+				xpfree(function->proname);
+				xpfree(function);
+				elog(ERROR, "plr: cache lookup for argument type %u failed",
+					 function->arg_typid[i]);
+			}
+			typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
+
+			/* Disallow pseudotype argument */
+			/* (note we already replaced ANYARRAY/ANYELEMENT) */
+			if (typeStruct->typtype == 'p')
+			{
+				xpfree(function->proname);
+				xpfree(function);
+				elog(ERROR, "plr functions cannot take type %s",
+					 format_type_be(function->arg_typid[i]));
+			}
+
+			if (typeStruct->typrelid != InvalidOid)
+				function->arg_is_rel[i] = 1;
+			else
+				function->arg_is_rel[i] = 0;
+
+			perm_fmgr_info(typeStruct->typoutput, &(function->arg_out_func[i]));
+
+			/* is argument an array? */
+			if (OidIsValid(get_element_type(function->arg_typid[i])))
+				function->arg_elem[i] = typeStruct->typelem;
+			else	/* not ant array */
+				function->arg_elem[i] = InvalidOid;
+
+			if (i > 0)
+				appendStringInfo(proc_internal_args, ",");
+			appendStringInfo(proc_internal_args, "arg%d", i + 1);
+
+			ReleaseSysCache(typeTup);
+
+			if (function->arg_elem[i] != InvalidOid)
+			{
+				int16		typlen;
+				bool		typbyval;
+				char		typdelim;
+				Oid			typoutput,
+							typelem;
+				FmgrInfo	outputproc;
+				char		typalign;
+
+				get_type_io_data(function->arg_elem[i], IOFunc_output,
+										 &typlen, &typbyval, &typalign,
+										 &typdelim, &typelem, &typoutput);
+
+				perm_fmgr_info(typoutput, &outputproc);
+
+				function->arg_elem_out_func[i] = outputproc;
+				function->arg_elem_typbyval[i] = typbyval;
+				function->arg_elem_typlen[i] = typlen;
+				function->arg_elem_typalign[i] = typalign;
+			}
+		}
+	}
+	else
+	{
+		/* trigger procedure has fixed args */
+		appendStringInfo(proc_internal_args,
+			"TGname,TGrelid,TGrelatts,TGwhen,TGlevel,TGop,TGnew,TGold,args");
+	}
+
+	/*
+	 * Create the R command to define the internal
+	 * procedure
+	 */
+	appendStringInfo(proc_internal_def,
+					 "%s <- function(%s) {",
+					 internal_proname,
+					 proc_internal_args->data);
+
+	/* Add user's function definition to proc body */
+	proc_source = DatumGetCString(DirectFunctionCall1(textout,
+							  PointerGetDatum(&procStruct->prosrc)));
+
+	appendStringInfo(proc_internal_def, "%s}", proc_source);
+
+	/* parse or find the R function */
+	if(proc_source && proc_source[0])
+		function->fun = plr_parse_func_body(proc_internal_def->data);
+	else
+		function->fun = Rf_findFun(Rf_install(proname), R_GlobalEnv);
+
+	R_PreserveObject(function->fun);
+
+	pfree(proc_source);
+	freeStringInfo(proc_internal_def);
+
+	/* test that this is really a function. */
+	if(function->fun == R_NilValue)
+	{
+		xpfree(function->proname);
+		xpfree(function);
+		elog(ERROR, "plr: cannot create internal procedure %s",
+			 internal_proname);
+	}
+
+	/* switch back to the context we were called with */
+	MemoryContextSwitchTo(oldcontext);
+
+	/*
+	 * add it to the hash table
+	 */
+	plr_HashTableInsert(function, hashkey);
+
+	return function;
 }
 
 static SEXP
@@ -876,7 +925,7 @@ call_r_func(SEXP fun, SEXP rargs)
 }
 
 static SEXP
-plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
+plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
 {
 	int		i;
 	SEXP	rargs,
@@ -886,13 +935,13 @@ plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 	 * Create an array of R objects with the number of elements
 	 * equal to the number of arguments.
 	 */
-	PROTECT(rargs = allocVector(VECSXP, prodesc->nargs));
+	PROTECT(rargs = allocVector(VECSXP, function->nargs));
 
 	/*
 	 * iterate over the arguments, convert each of them and put them in
 	 * the array.
 	 */
-	for (i = 0; i < prodesc->nargs; i++)
+	for (i = 0; i < function->nargs; i++)
 	{
 		if (fcinfo->argnull[i])
 		{
@@ -900,7 +949,7 @@ plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 			PROTECT(el = NEW_CHARACTER(1));
 			SET_STRING_ELT(el, 0, NA_STRING);
 		}
-		else if (prodesc->arg_is_rel[i])
+		else if (function->arg_is_rel[i])
 		{
 			/* for tuple args, convert to a one row data.frame */
 			TupleTableSlot *slot = (TupleTableSlot *) fcinfo->arg[i];
@@ -909,12 +958,12 @@ plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 
 			PROTECT(el = pg_tuple_get_r_frame(1, &tuples, tupdesc));
 		}
-		else if (prodesc->arg_elem[i] == 0)
+		else if (function->arg_elem[i] == 0)
 		{
 			/* for scalar args, convert to a one row vector */
 			Datum		dvalue = fcinfo->arg[i];
-			Oid			arg_typid = prodesc->arg_typid[i];
-			FmgrInfo	arg_out_func = prodesc->arg_out_func[i];
+			Oid			arg_typid = function->arg_typid[i];
+			FmgrInfo	arg_out_func = function->arg_out_func[i];
 
 			PROTECT(el = pg_scalar_get_r(dvalue, arg_typid, arg_out_func));
 		}
@@ -922,10 +971,10 @@ plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 		{
 			/* better be a pg array arg, convert to a multi-row vector */
 			Datum		dvalue = fcinfo->arg[i];
-			FmgrInfo	out_func = prodesc->arg_elem_out_func[i];
-			int			typlen = prodesc->arg_elem_typlen[i];
-			bool		typbyval = prodesc->arg_elem_typbyval[i];
-			char		typalign = prodesc->arg_elem_typalign[i];
+			FmgrInfo	out_func = function->arg_elem_out_func[i];
+			int			typlen = function->arg_elem_typlen[i];
+			bool		typbyval = function->arg_elem_typbyval[i];
+			char		typalign = function->arg_elem_typalign[i];
 
 			PROTECT(el = pg_array_get_r(dvalue, out_func, typlen, typbyval, typalign));
 		}
@@ -939,3 +988,12 @@ plr_convertargs(plr_proc_desc *prodesc, FunctionCallInfo fcinfo)
 	return(rargs);
 }
 
+/*
+ * error context callback to let us supply a call-stack traceback
+ */
+static void
+plr_error_callback(void *arg)
+{
+	if (plr_error_funcname)
+		errcontext("compile of PL/R function %s", plr_error_funcname);
+}
