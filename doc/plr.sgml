@@ -100,6 +100,15 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
     available.
    </para>
   </tip>
+
+  <tip>
+   <para>
+    R_HOME must be defined in the environment of the user under which
+    PostgreSQL is started, <emphasis>before</emphasis> the postmaster
+    is started. Otherwise PL/R will refuse to load.
+   </para>
+  </tip>
+
  </chapter>
 
  <chapter id="plr-funcs">
@@ -975,7 +984,7 @@ select pg_test_module_load('hello world');
 
     <para>
      The table <literal>plr_modules</literal> must be readable by all,
-     but it is wise to make them owned and writable only by the database
+     but it is wise to make it owned and writable only by the database
      administrator.
     </para>
  </chapter>

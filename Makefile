@@ -3,7 +3,7 @@ r_libdir = ${R_HOME}/bin
 # location of R includes
 r_includespec = ${R_HOME}/include
 
-subdir = src/pl/plr
+subdir = contrib/plr
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 
@@ -14,12 +14,14 @@ ifneq (,$(wildcard $(r_libdir)/libR*$(DLSUFFIX)*))
 shared_libr = yes
 endif
 
+# If we don't have a shared library and the platform doesn't allow it
+# to work without, we have to skip it.
+ifneq (,$(findstring yes, $(shared_libr)$(allow_nonpic_in_shlib)))
+
 override CPPFLAGS := -I$(srcdir) -I$(r_includespec) $(CPPFLAGS)
 override CPPFLAGS += -DPKGLIBDIR=\"$(pkglibdir)\" -DDLSUFFIX=\"$(DLSUFFIX)\"
 rpath :=
 
-SGMLDOCS	:= doc/plr.sgml
-BUILDDOCS	:= jade -c ${DOCBOOKSTYLE}/catalog -d $(top_builddir)/doc/src/sgml/stylesheet.dsl -i output-html -t sgml
 MODULE_big	:= plr
 PG_CPPFLAGS	:= -I$(r_includespec)
 SRCS		+= plr.c pg_conversion.c pg_backend_support.c pg_userfuncs.c pg_rsupport.c
@@ -32,3 +34,14 @@ REGRESS		:= plr
 EXTRA_CLEAN	:= doc/HTML.index
 
 include $(top_srcdir)/contrib/contrib-global.mk
+
+else # can't build
+
+all:
+	@echo ""; \
+	 echo "*** Cannot build PL/R because libR is not a shared library." ; \
+	 echo "*** You might have to rebuild your R installation.  Refer to"; \
+	 echo "*** the documentation for details."; \
+	 echo ""
+
+endif # can't build
