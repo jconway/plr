@@ -41,7 +41,6 @@ char *last_R_error_msg = NULL;
 
 static bool	plr_pm_init_done = false;
 static bool	plr_be_init_done = false;
-static FunctionCallInfo plr_current_fcinfo = NULL;
 
 /*
  * defines
@@ -106,14 +105,14 @@ static FunctionCallInfo plr_current_fcinfo = NULL;
  */
 static void plr_load_builtins(Oid funcid);
 static void plr_init_all(Oid funcid);
-static HeapTuple plr_trigger_handler(PG_FUNCTION_ARGS);
+static Datum plr_trigger_handler(PG_FUNCTION_ARGS);
 static Datum plr_func_handler(PG_FUNCTION_ARGS);
 static plr_function *compile_plr_function(FunctionCallInfo fcinfo);
 static plr_function *do_compile(FunctionCallInfo fcinfo,
 							    HeapTuple procTup,
 							    plr_func_hashkey *hashkey);
 static SEXP plr_parse_func_body(const char *body);
-static SEXP plr_convertargs(plr_function *function, FunctionCallInfo fcinfo);
+static SEXP plr_convertargs(plr_function *function, Datum *arg, bool *argnull);
 static void plr_error_callback(void *arg);
 
 /*
@@ -146,15 +145,9 @@ plr_call_handler(PG_FUNCTION_ARGS)
 	plr_init_all(fcinfo->flinfo->fn_oid);
 
 	if (CALLED_AS_TRIGGER(fcinfo))
-	{
-		plr_current_fcinfo = NULL;
-		retval = PointerGetDatum(plr_trigger_handler(fcinfo));
-	}
+		retval = plr_trigger_handler(fcinfo);
 	else
-	{
-		plr_current_fcinfo = fcinfo;
 		retval = plr_func_handler(fcinfo);
-	}
 
 	/* switch back to SPI memory context */
 	MemoryContextSwitchTo(plr_SPI_context);
@@ -409,15 +402,162 @@ plr_init_all(Oid funcid)
 	MemoryContextSwitchTo(oldcontext);
 }
 
-static HeapTuple
+static Datum
 plr_trigger_handler(PG_FUNCTION_ARGS)
 {
-	/* FIXME */
-	ereport(ERROR,
-			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-			 errmsg("feature not supported")));
+	plr_function  *function;
+	SEXP			fun;
+	SEXP			rargs;
+	SEXP			rvalue;
+	Datum			retval;
+	Datum			arg[FUNC_MAX_ARGS];
+	bool			argnull[FUNC_MAX_ARGS];
+	TriggerData	   *trigdata = (TriggerData *) fcinfo->context;
+	TupleDesc		tupdesc = trigdata->tg_relation->rd_att;
+	TupleTableSlot *slot;
+	Datum			dvalues[trigdata->tg_trigger->tgnargs];
+	ArrayType	   *array;
+	int				ndims = 1;
+	int				dims[ndims];
+	int				lbs[ndims];
 
-	return (HeapTuple) 0;
+	ERRORCONTEXTCALLBACK;
+	int				i;
+
+	/* Find or compile the function */
+	function = compile_plr_function(fcinfo);
+
+	/* set up error context */
+	PUSH_PLERRCONTEXT(plr_error_callback, function->proname);
+
+	/*
+	 * Build up arguments for the trigger function. The data types
+	 * are mostly hardwired in advance
+	 */
+	/* first is trigger name */
+	arg[0] = DirectFunctionCall1(textin,
+				 CStringGetDatum(trigdata->tg_trigger->tgname));
+	argnull[0] = false;
+
+	/* second is trigger relation oid */
+	arg[1] = ObjectIdGetDatum(trigdata->tg_relation->rd_id);
+	argnull[1] = false;
+
+	/* third is trigger relation name */
+	arg[2] = DirectFunctionCall1(textin,
+				 CStringGetDatum(get_rel_name(trigdata->tg_relation->rd_id)));
+	argnull[2] = false;
+
+	/* fourth is when trigger fired, i.e. BEFORE or AFTER */
+	if (TRIGGER_FIRED_BEFORE(trigdata->tg_event))
+		arg[3] = DirectFunctionCall1(textin,
+				 CStringGetDatum("BEFORE"));
+	else if (TRIGGER_FIRED_AFTER(trigdata->tg_event))
+		arg[3] = DirectFunctionCall1(textin,
+				 CStringGetDatum("AFTER"));
+	else
+		/* internal error */
+		elog(ERROR, "unrecognized tg_event");
+	argnull[3] = false;
+
+	/* fifth is level trigger fired, i.e. ROW or STATEMENT */
+	if (TRIGGER_FIRED_FOR_ROW(trigdata->tg_event))
+		arg[4] = DirectFunctionCall1(textin,
+				 CStringGetDatum("ROW"));
+	else if (TRIGGER_FIRED_FOR_STATEMENT(trigdata->tg_event))
+		arg[4] = DirectFunctionCall1(textin,
+				 CStringGetDatum("STATEMENT"));
+	else
+		/* internal error */
+		elog(ERROR, "unrecognized tg_event");
+	argnull[4] = false;
+
+	/*
+	 * sixth is operation that fired trigger, i.e. INSERT, UPDATE, or DELETE
+	 * seventh is NEW, eigth is OLD
+	 */
+
+	if (TRIGGER_FIRED_BY_INSERT(trigdata->tg_event))
+	{
+		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("INSERT"));
+
+		slot = TupleDescGetSlot(tupdesc);
+		slot->val = trigdata->tg_trigtuple;
+		arg[6] = PointerGetDatum(slot);
+		argnull[6] = false;
+
+		arg[7] = (Datum) 0;
+		argnull[7] = true;
+	}
+	else if (TRIGGER_FIRED_BY_DELETE(trigdata->tg_event))
+	{
+		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("DELETE"));
+
+		arg[6] = (Datum) 0;
+		argnull[6] = true;
+
+		slot = TupleDescGetSlot(tupdesc);
+		slot->val = trigdata->tg_trigtuple;
+		arg[7] = PointerGetDatum(slot);
+		argnull[7] = false;
+	}
+	else if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event))
+	{
+		arg[5] = DirectFunctionCall1(textin, CStringGetDatum("UPDATE"));
+
+		slot = TupleDescGetSlot(tupdesc);
+		slot->val = trigdata->tg_newtuple;
+		arg[6] = PointerGetDatum(slot);
+		argnull[6] = false;
+
+		slot = TupleDescGetSlot(tupdesc);
+		slot->val = trigdata->tg_trigtuple;
+		arg[7] = PointerGetDatum(slot);
+		argnull[7] = false;
+	}
+	else
+		/* internal error */
+		elog(ERROR, "unrecognized tg_event");
+	argnull[5] = false;
+
+	/*
+	 * finally, ninth argument is a text array of trigger arguments
+	 */
+	for (i = 0; i < trigdata->tg_trigger->tgnargs; i++)
+		dvalues[i] = DirectFunctionCall1(textin,
+						 CStringGetDatum(trigdata->tg_trigger->tgargs[i]));
+
+	dims[0] = trigdata->tg_trigger->tgnargs;
+	lbs[0] = 1;
+	array = construct_md_array(dvalues, ndims, dims, lbs,
+								TEXTOID, -1, false, 'i');
+
+	arg[8] = PointerGetDatum(array);
+	argnull[8] = false;
+
+	/*
+	 * All done building args; from this point it is just like
+	 * calling a non-trigger function, except we need to be careful
+	 * that the return value tuple is the same tupdesc as the trigger tuple.
+	 */
+	PROTECT(fun = function->fun);
+
+	/* Convert all call arguments */
+	PROTECT(rargs = plr_convertargs(function, arg, argnull));
+
+	/* Call the R function */
+	PROTECT(rvalue = call_r_func(fun, rargs));
+
+	/*
+	 * Convert the return value from an R object to a Datum.
+	 * We expect r_get_pg to do the right thing with missing or empty results.
+	 */
+	retval = r_get_pg(rvalue, function, fcinfo);
+
+	POP_PLERRCONTEXT;
+	UNPROTECT(3);
+
+	return retval;
 }
 
 static Datum
@@ -439,7 +579,7 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	PROTECT(fun = function->fun);
 
 	/* Convert all call arguments */
-	PROTECT(rargs = plr_convertargs(function, fcinfo));
+	PROTECT(rargs = plr_convertargs(function, fcinfo->arg, fcinfo->argnull));
 
 	/* Call the R function */
 	PROTECT(rvalue = call_r_func(fun, rargs));
@@ -579,10 +719,9 @@ do_compile(FunctionCallInfo fcinfo,
 		   HeapTuple procTup,
 		   plr_func_hashkey *hashkey)
 {
-	Form_pg_proc		procStruct = (Form_pg_proc) GETSTRUCT(procTup);
-	bool				is_trigger = CALLED_AS_TRIGGER(fcinfo) ? true : false;
-	plr_function	   *function = NULL;
-
+	Form_pg_proc			procStruct = (Form_pg_proc) GETSTRUCT(procTup);
+	bool					is_trigger = CALLED_AS_TRIGGER(fcinfo) ? true : false;
+	plr_function		   *function = NULL;
 	Oid						fn_oid = fcinfo->flinfo->fn_oid;
 	char					internal_proname[MAX_PRONAME_LEN];
 	char				   *proname;
@@ -708,7 +847,7 @@ do_compile(FunctionCallInfo fcinfo,
 		/* is return type an array? */
 		if (OidIsValid(get_element_type(function->result_typid)))
 			function->result_elem = typeStruct->typelem;
-		else	/* not ant array */
+		else	/* not an array */
 			function->result_elem = InvalidOid;
 
 		ReleaseSysCache(typeTup);
@@ -737,6 +876,12 @@ do_compile(FunctionCallInfo fcinfo,
 			function->result_elem_typlen = typlen;
 			function->result_elem_typalign = typalign;
 		}
+	}
+	else /* trigger */
+	{
+		function->result_typid = TRIGGEROID;
+		function->result_istuple = true;
+		function->result_elem = InvalidOid;
 	}
 
 	/*
@@ -826,9 +971,79 @@ do_compile(FunctionCallInfo fcinfo,
 	}
 	else
 	{
+		int16		typlen;
+		bool		typbyval;
+		char		typdelim;
+		Oid			typoutput,
+					typelem;
+		FmgrInfo	outputproc;
+		char		typalign;
+
+		function->nargs = TRIGGER_NARGS;
+
+		/* take care of the only non-TEXT first */
+		get_type_io_data(OIDOID, IOFunc_output,
+								 &typlen, &typbyval, &typalign,
+								 &typdelim, &typelem, &typoutput);
+
+		function->arg_typid[1] = OIDOID;
+		function->arg_elem[1] = InvalidOid;
+		function->arg_is_rel[1] = 0;
+		perm_fmgr_info(typoutput, &(function->arg_out_func[1]));
+
+		get_type_io_data(TEXTOID, IOFunc_output,
+								 &typlen, &typbyval, &typalign,
+								 &typdelim, &typelem, &typoutput);
+
+		function->arg_typid[0] = TEXTOID;
+		function->arg_elem[0] = InvalidOid;
+		function->arg_is_rel[0] = 0;
+		perm_fmgr_info(typoutput, &(function->arg_out_func[0]));
+
+		function->arg_typid[2] = TEXTOID;
+		function->arg_elem[2] = InvalidOid;
+		function->arg_is_rel[2] = 0;
+		perm_fmgr_info(typoutput, &(function->arg_out_func[2]));
+
+		function->arg_typid[3] = TEXTOID;
+		function->arg_elem[3] = InvalidOid;
+		function->arg_is_rel[3] = 0;
+		perm_fmgr_info(typoutput, &(function->arg_out_func[3]));
+
+		function->arg_typid[4] = TEXTOID;
+		function->arg_elem[4] = InvalidOid;
+		function->arg_is_rel[4] = 0;
+		perm_fmgr_info(typoutput, &(function->arg_out_func[4]));
+
+		function->arg_typid[5] = TEXTOID;
+		function->arg_elem[5] = InvalidOid;
+		function->arg_is_rel[5] = 0;
+		perm_fmgr_info(typoutput, &(function->arg_out_func[5]));
+
+		function->arg_typid[6] = RECORDOID;
+		function->arg_elem[6] = InvalidOid;
+		function->arg_is_rel[6] = 1;
+
+		function->arg_typid[7] = RECORDOID;
+		function->arg_elem[7] = InvalidOid;
+		function->arg_is_rel[7] = 1;
+
+		function->arg_typid[8] = TEXTARRAYOID;
+		function->arg_elem[8] = TEXTOID;
+		function->arg_is_rel[8] = 0;
+		get_type_io_data(function->arg_elem[8], IOFunc_output,
+								 &typlen, &typbyval, &typalign,
+								 &typdelim, &typelem, &typoutput);
+		perm_fmgr_info(typoutput, &outputproc);
+		function->arg_elem_out_func[8] = outputproc;
+		function->arg_elem_typbyval[8] = typbyval;
+		function->arg_elem_typlen[8] = typlen;
+		function->arg_elem_typalign[8] = typalign;
+
 		/* trigger procedure has fixed args */
 		appendStringInfo(proc_internal_args,
-			"tg.name,tg.relid,tg.relatts,tg.when,tg.level,tg.op,tg.new,tg.old,args");
+						"pg.tg.name,pg.tg.relid,pg.tg.relname,pg.tg.when," \
+						"pg.tg.level,pg.tg.op,pg.tg.new,pg.tg.old,pg.args");
 	}
 
 	/*
@@ -956,7 +1171,7 @@ call_r_func(SEXP fun, SEXP rargs)
 }
 
 static SEXP
-plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
+plr_convertargs(plr_function *function, Datum *arg, bool *argnull)
 {
 	int		i;
 	SEXP	rargs,
@@ -974,7 +1189,7 @@ plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
 	 */
 	for (i = 0; i < function->nargs; i++)
 	{
-		if (fcinfo->argnull[i])
+		if (argnull[i])
 		{
 			/* fast track for null arguments */
 			PROTECT(el = R_NilValue);
@@ -982,7 +1197,7 @@ plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
 		else if (function->arg_is_rel[i])
 		{
 			/* for tuple args, convert to a one row data.frame */
-			TupleTableSlot *slot = (TupleTableSlot *) fcinfo->arg[i];
+			TupleTableSlot *slot = (TupleTableSlot *) arg[i];
 			HeapTuple		tuples = slot->val;
 			TupleDesc		tupdesc = slot->ttc_tupleDescriptor;
 
@@ -991,7 +1206,7 @@ plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
 		else if (function->arg_elem[i] == 0)
 		{
 			/* for scalar args, convert to a one row vector */
-			Datum		dvalue = fcinfo->arg[i];
+			Datum		dvalue = arg[i];
 			Oid			arg_typid = function->arg_typid[i];
 			FmgrInfo	arg_out_func = function->arg_out_func[i];
 
@@ -1000,7 +1215,7 @@ plr_convertargs(plr_function *function, FunctionCallInfo fcinfo)
 		else
 		{
 			/* better be a pg array arg, convert to a multi-row vector */
-			Datum		dvalue = fcinfo->arg[i];
+			Datum		dvalue = arg[i];
 			FmgrInfo	out_func = function->arg_elem_out_func[i];
 			int			typlen = function->arg_elem_typlen[i];
 			bool		typbyval = function->arg_elem_typbyval[i];

@@ -450,9 +450,9 @@ select pg_quote_literal('Hello\'World');
 
 create or replace function test_spi_t(text) returns text as 'pg.spi.exec(arg1)' language 'plr';
 select test_spi_t('select oid, typname from pg_type where typname = ''oid'' or typname = ''text''');
-  test_spi_t   
----------------
- c("25", "26")
+ test_spi_t 
+------------
+ c(25, 26)
 (1 row)
 
 create or replace function test_spi_ta(text) returns text[] as 'pg.spi.exec(arg1)' language 'plr';

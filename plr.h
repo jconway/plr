@@ -41,6 +41,9 @@
 #define ELOG_H
 
 #include "postgres.h"
+
+#include "fmgr.h"
+#include "funcapi.h"
 #include "access/heapam.h"
 #include "catalog/catversion.h"
 #include "catalog/pg_language.h"
@@ -56,7 +59,6 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
-#include "fmgr.h"
 
 #include "R.h"
 #include "Rinternals.h"
@@ -168,7 +170,11 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 		error_context_stack = ecs_save; \
 	} while (0)
 
+#ifndef TEXTARRAYOID
+#define TEXTARRAYOID	1009
+#endif
 
+#define TRIGGER_NARGS	9
 
 #ifdef PG_VERSION_73_COMPAT
 /*************************************************************************

@@ -37,13 +37,20 @@
 #include "miscadmin.h"
 #include "catalog/catversion.h"
 
-static void pg_get_one_r(char *value, Oid arg_out_fn_oid, SEXP *obj, int elnum);
+static void pg_get_one_r(char *value, Oid arg_out_fn_oid, SEXP *obj,
+																int elnum);
 static SEXP get_r_vector(Oid typtype, int numels);
-static Datum get_tuplestore(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bool *isnull);
+static Datum get_trigger_tuple(SEXP rval, plr_function *function,
+									FunctionCallInfo fcinfo, bool *isnull);
+static Datum get_tuplestore(SEXP rval, plr_function *function,
+									FunctionCallInfo fcinfo, bool *isnull);
 static Datum get_array_datum(SEXP rval, plr_function *function, bool *isnull);
-static Datum get_frame_array_datum(SEXP rval, plr_function *function, bool *isnull);
-static Datum get_md_array_datum(SEXP rval, int ndims, plr_function *function, bool *isnull);
-static Datum get_generic_array_datum(SEXP rval, plr_function *function, bool *isnull);
+static Datum get_frame_array_datum(SEXP rval, plr_function *function,
+																bool *isnull);
+static Datum get_md_array_datum(SEXP rval, int ndims, plr_function *function,
+																bool *isnull);
+static Datum get_generic_array_datum(SEXP rval, plr_function *function,
+																bool *isnull);
 static Tuplestorestate *get_frame_tuplestore(SEXP rval,
 											 plr_function *function,
 											 AttInMetadata *attinmeta,
@@ -330,6 +337,7 @@ get_r_vector(Oid typtype, int numels)
 
 	switch (typtype)
 	{
+		case OIDOID:
 		case INT2OID:
 		case INT4OID:
 			/* 2 and 4 byte integer pgsql datatype => use R INTEGER */
@@ -367,6 +375,7 @@ pg_get_one_r(char *value, Oid typtype, SEXP *obj, int elnum)
 {
 	switch (typtype)
 	{
+		case OIDOID:
 		case INT2OID:
 		case INT4OID:
 			/* 2 and 4 byte integer pgsql datatype => use R INTEGER */
@@ -402,7 +411,9 @@ r_get_pg(SEXP rval, plr_function *function, FunctionCallInfo fcinfo)
 	bool	isnull = false;
 	Datum	result;
 
-	if (function->result_istuple || fcinfo->flinfo->fn_retset)
+	if (CALLED_AS_TRIGGER(fcinfo))
+		result = get_trigger_tuple(rval, function, fcinfo, &isnull);
+	else if (function->result_istuple || fcinfo->flinfo->fn_retset)
 		result = get_tuplestore(rval, function, fcinfo, &isnull);
 	else
 	{
@@ -424,6 +435,167 @@ r_get_pg(SEXP rval, plr_function *function, FunctionCallInfo fcinfo)
 		fcinfo->isnull = true;
 
 	return result;
+}
+
+static Datum
+get_trigger_tuple(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bool *isnull)
+{
+	TriggerData	   *trigdata = (TriggerData *) fcinfo->context;
+	TupleDesc		tupdesc = trigdata->tg_relation->rd_att;
+	AttInMetadata  *attinmeta;
+	MemoryContext	fn_mcxt;
+	MemoryContext	oldcontext;
+	int				nc;
+	int				nr;
+	char		  **values;
+	HeapTuple		tuple = NULL;
+	int				i, j;
+	SEXP			result;
+	SEXP			dfcol;
+
+	/* short circuit statement level trigger which always returns NULL */
+	if (TRIGGER_FIRED_FOR_STATEMENT(trigdata->tg_event))
+	{
+		/* special for triggers, don't set isnull flag */
+		*isnull = false;
+		return (Datum) 0;
+	}
+
+	/* short circuit if return value is Null */
+	if (rval == R_NilValue || isNull(rval))	/* probably redundant */
+	{
+		/* special for triggers, don't set isnull flag */
+		*isnull = false;
+		return (Datum) 0;
+	}
+
+	if (isFrame(rval))
+		nc = length(rval);
+	else if (isMatrix(rval))
+		nc = ncols(rval);
+	else
+		nc = 1;
+
+	PROTECT(dfcol = VECTOR_ELT(rval, 0));
+	nr = length(dfcol);
+	UNPROTECT(1);
+
+	if (nr != 1)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_EXCEPTION),
+				 errmsg("incorrect function return type"),
+				 errdetail("function return value cannot have more " \
+						   "than one row")));
+
+	/*
+	 * Check to make sure we have the same number of columns
+	 * to return as there are attributes in the return tuple.
+	 *
+	 * Note we will attempt to coerce the R values into whatever
+	 * the return attribute type is and depend on the "in"
+	 * function to complain if needed.
+	 */
+	if (nc != tupdesc->natts)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATATYPE_MISMATCH),
+				 errmsg("returned tuple structure does not match table " \
+						"of trigger event")));
+
+	fn_mcxt = fcinfo->flinfo->fn_mcxt;
+	oldcontext = MemoryContextSwitchTo(fn_mcxt);
+
+	attinmeta = TupleDescGetAttInMetadata(tupdesc);
+
+	/* coerce columns to character in advance */
+	PROTECT(result = NEW_LIST(nc));
+	for (j = 0; j < nc; j++)
+	{
+		PROTECT(dfcol = VECTOR_ELT(rval, j));
+		if(!isFactor(dfcol))
+		{
+			SEXP	obj;
+
+			PROTECT(obj = AS_CHARACTER(dfcol));
+			SET_VECTOR_ELT(result, j, obj);
+			UNPROTECT(1);
+		}
+		else
+		{
+			SEXP 	t;
+
+			for (t = ATTRIB(dfcol); t != R_NilValue; t = CDR(t))
+			{
+				if(TAG(t) == R_LevelsSymbol)
+				{
+					PROTECT(SETCAR(t, AS_CHARACTER(CAR(t))));
+					UNPROTECT(1);
+					break;
+				}
+			}
+			SET_VECTOR_ELT(result, j, dfcol);
+		}
+
+		UNPROTECT(1);
+	}
+
+	values = (char **) palloc(nc * sizeof(char *));
+
+	for(i = 0; i < nr; i++)
+	{
+		for (j = 0; j < nc; j++)
+		{
+			PROTECT(dfcol = VECTOR_ELT(result, j));
+
+			if(isFactor(dfcol))
+			{
+				SEXP t;
+				for (t = ATTRIB(dfcol); t != R_NilValue; t = CDR(t))
+				{
+					if(TAG(t) == R_LevelsSymbol)
+					{
+						SEXP	obj;
+						int		idx = (int) VECTOR_ELT(dfcol, i);
+
+						PROTECT(obj = CAR(t));
+						values[j] = pstrdup(CHAR(STRING_ELT(obj, idx - 1)));
+						UNPROTECT(1);
+
+						break;
+					}
+				}
+			}
+			else
+			{
+				if (STRING_ELT(dfcol, 0) != NA_STRING)
+					values[j] = pstrdup(CHAR(STRING_ELT(dfcol, i)));
+				else
+					values[j] = NULL;
+			}
+
+			UNPROTECT(1);
+		}
+
+		/* construct the tuple */
+		tuple = BuildTupleFromCStrings(attinmeta, values);
+
+		for (j = 0; j < nc; j++)
+			if (values[j] != NULL)
+				pfree(values[j]);
+    }
+
+	MemoryContextSwitchTo(oldcontext);
+
+	if (tuple)
+	{
+		*isnull = false;
+		return PointerGetDatum(tuple);
+	}
+	else
+	{
+		/* special for triggers, don't set isnull flag */
+		*isnull = false;
+		return (Datum) 0;
+	}
 }
 
 static Datum
