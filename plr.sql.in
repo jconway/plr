@@ -47,3 +47,18 @@ RETURNS SETOF r_typename AS '
   for (i in 1:length(x)) {y[i] <- eval(parse(text = x[i]))}
   data.frame(typename = x, typeoid = y)
 ' language 'plr';
+
+CREATE OR REPLACE FUNCTION load_r_typenames()
+RETURNS text AS '
+  sql <- "select upper(typname::text) || ''OID'' as typename, oid from pg_catalog.pg_type where typtype = ''b'' order by typname"
+  rs <- pg.spi.exec(sql)
+  for(i in 1:nrow(rs))
+  {
+    typobj <- rs[i,1]
+    typval <- rs[i,2]
+    if (substr(typobj,1,1) == "_")
+      typobj <- paste("ARRAYOF", substr(typobj,2,nchar(typobj)), sep="")
+    assign(typobj, typval, .GlobalEnv)
+  }
+  return("OK")
+' language 'plr';

@@ -294,6 +294,7 @@ extern SEXP plr_SPI_exec(SEXP rsql);
 extern SEXP plr_SPI_prepare(SEXP rsql, SEXP rargtypes);
 extern SEXP plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues);
 extern SEXP plr_SPI_lastoid(void);
+extern void throw_r_error(const char **msg);
 
 /* Postgres callable functions useful in conjunction with PL/R */
 extern Datum reload_plr_modules(PG_FUNCTION_ARGS);

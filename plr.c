@@ -50,11 +50,19 @@ static FunctionCallInfo plr_current_fcinfo = NULL;
 #define MAX_PRONAME_LEN		NAMEDATALEN
 
 #define OPTIONS_NULL_CMD	"options(error = expression(NULL))"
+#define THROWRERROR_CMD \
+			"pg.throwrerror <-function(msg) " \
+			"{" \
+			"  msglen <- nchar(msg);" \
+			"  if (substr(msg, msglen, msglen + 1) == \"\\n\")" \
+			"    msg <- substr(msg, 1, msglen - 1);" \
+			"  .C(\"throw_r_error\", as.character(msg));" \
+			"}"
+#define OPTIONS_THROWRERROR_CMD \
+			"options(error = expression(pg.throwrerror(geterrmessage())))"
 #define THROWNOTICE_CMD \
 			"pg.thrownotice <-function(msg) " \
 			"{.C(\"throw_pg_notice\", as.character(msg))}"
-#define OPTIONS_THROWNOTICE_CMD \
-			"options(error = expression(pg.thrownotice(geterrmessage())))"
 #define THROWERROR_CMD \
 			"pg.throwerror <-function(msg) " \
 			"{.C(\"throw_pg_error\", as.character(msg))}"
@@ -66,66 +74,6 @@ static FunctionCallInfo plr_current_fcinfo = NULL;
 			"{.Call(\"plr_quote_ident\", sql)}"
 #define SPI_EXEC_CMD \
 			"pg.spi.exec <-function(sql) {.Call(\"plr_SPI_exec\", sql)}"
-#define TYPEOIDS_CMD 	"ABSTIMEOID <- as.integer(702); " \
-						"ACLITEMOID <- as.integer(1033); " \
-						"ANYARRAYOID <- as.integer(2277); " \
-						"ANYELEMENTOID <- as.integer(2283); " \
-						"ANYOID <- as.integer(2276); " \
-						"BITOID <- as.integer(1560); " \
-						"BOOLOID <- as.integer(16); " \
-						"BOXOID <- as.integer(603); " \
-						"BPCHAROID <- as.integer(1042); " \
-						"BYTEAOID <- as.integer(17); " \
-						"CASHOID <- as.integer(790); " \
-						"CHAROID <- as.integer(18); " \
-						"CIDOID <- as.integer(29); " \
-						"CIDROID <- as.integer(650); " \
-						"CIRCLEOID <- as.integer(718); " \
-						"CSTRINGOID <- as.integer(2275); " \
-						"DATEOID <- as.integer(1082); " \
-						"FLOAT4OID <- as.integer(700); " \
-						"FLOAT8OID <- as.integer(701); " \
-						"INETOID <- as.integer(869); " \
-						"INT2OID <- as.integer(21); " \
-						"INT2VECTOROID <- as.integer(22); " \
-						"INT4OID <- as.integer(23); " \
-						"INT8OID <- as.integer(20); " \
-						"INTERNALOID <- as.integer(2281); " \
-						"INTERVALOID <- as.integer(1186); " \
-						"LANGUAGE_HANDLEROID <- as.integer(2280); " \
-						"LINEOID <- as.integer(628); " \
-						"LSEGOID <- as.integer(601); " \
-						"MACADDROID <- as.integer(829); " \
-						"NAMEOID <- as.integer(19); " \
-						"NUMERICOID <- as.integer(1700); " \
-						"OIDOID <- as.integer(26); " \
-						"OIDVECTOROID <- as.integer(30); " \
-						"OPAQUEOID <- as.integer(2282); " \
-						"PATHOID <- as.integer(602); " \
-						"POINTOID <- as.integer(600); " \
-						"POLYGONOID <- as.integer(604); " \
-						"RECORDOID <- as.integer(2249); " \
-						"REFCURSOROID <- as.integer(1790); " \
-						"REGCLASSOID <- as.integer(2205); " \
-						"REGOPERATOROID <- as.integer(2204); " \
-						"REGOPEROID <- as.integer(2203); " \
-						"REGPROCEDUREOID <- as.integer(2202); " \
-						"REGPROCOID <- as.integer(24); " \
-						"REGTYPEOID <- as.integer(2206); " \
-						"RELTIMEOID <- as.integer(703); " \
-						"TEXTOID <- as.integer(25); " \
-						"TIDOID <- as.integer(27); " \
-						"TIMEOID <- as.integer(1083); " \
-						"TIMESTAMPOID <- as.integer(1114); " \
-						"TIMESTAMPTZOID <- as.integer(1184); " \
-						"TIMETZOID <- as.integer(1266); " \
-						"TINTERVALOID <- as.integer(704); " \
-						"TRIGGEROID <- as.integer(2279); " \
-						"UNKNOWNOID <- as.integer(705); " \
-						"VARBITOID <- as.integer(1562); " \
-						"VARCHAROID <- as.integer(1043); " \
-						"VOIDOID <- as.integer(2278); " \
-						"XIDOID <- as.integer(28); "
 #define SPI_PREPARE_CMD \
 			"pg.spi.prepare <-function(sql, argtypes = NA) " \
 			"{.Call(\"plr_SPI_prepare\", sql, argtypes)}"
@@ -146,6 +94,8 @@ static FunctionCallInfo plr_current_fcinfo = NULL;
 			"}"
 #define REVAL \
 			"pg.reval <- function(arg1) {eval(parse(text = arg1))}"
+#define PG_STATE_FIRSTPASS \
+			"pg.state.firstpass <- TRUE"
 
 #define CurrentTriggerData ((TriggerData *) fcinfo->context)
 
@@ -285,15 +235,15 @@ plr_init_interp(Oid funcid)
 		OPTIONS_NULL_CMD,
 
 		/* set up the postgres error handler in R */
+		THROWRERROR_CMD,
+		OPTIONS_THROWRERROR_CMD,
 		THROWNOTICE_CMD,
-		OPTIONS_THROWNOTICE_CMD,
 		THROWERROR_CMD,
 
 		/* install the commands for SPI support in the interpreter */
 		QUOTE_LITERAL_CMD,
 		QUOTE_IDENT_CMD,
 		SPI_EXEC_CMD,
-		TYPEOIDS_CMD,
 		SPI_PREPARE_CMD,
 		SPI_EXECP_CMD,
 		SPI_LASTOID_CMD,
@@ -513,6 +463,12 @@ compile_plr_function(FunctionCallInfo fcinfo)
 
 		/* And do the lookup */
 		function = plr_HashTableLookup(&hashkey);
+
+		/*
+		 * first time through for this statement, set
+		 * firstpass to TRUE
+		 */
+		load_r_cmd(PG_STATE_FIRSTPASS);
 	}
 
 	if (function)

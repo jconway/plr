@@ -6,6 +6,9 @@
 \i plr.sql
 \set ECHO all
 
+-- make typenames available in the global namespace
+select load_r_typenames();
+
 CREATE TABLE plr_modules (
   modseq int4,
   modsrc text

@@ -593,7 +593,29 @@ plr_SPI_lastoid(void)
 	return result;
 }
 
-#ifndef PG_VERSION_73_COMPAT
+#ifdef PG_VERSION_73_COMPAT
+/*************************************************************************
+ * working with postgres 7.3 compatible sources
+ *************************************************************************/
+void
+throw_r_error(const char **msg)
+{
+	throw_pg_notice(msg);
+}
+
+#else
+/*************************************************************************
+ * working with postgres 7.4 compatible sources
+ *************************************************************************/
+
+void
+throw_r_error(const char **msg)
+{
+	if (msg && *msg)
+		elog(ERROR, "%s", *msg);
+	else
+		elog(ERROR, "%s", "");
+}
 
 /*
  * error context callback to let us supply a call-stack traceback
