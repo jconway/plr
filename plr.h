@@ -214,7 +214,7 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 		if (procStruct->prorettype == ANYARRAYOID || \
 			procStruct->prorettype == ANYELEMENTOID) \
 		{ \
-			prorettype_ = get_fn_expr_rettype(fcinfo); \
+			prorettype_ = get_fn_expr_rettype(fcinfo->flinfo); \
 			if (prorettype_ == InvalidOid) \
 				prorettype_ = procStruct->prorettype; \
 		} \
@@ -231,7 +231,7 @@ extern SEXP R_ParseVector(SEXP, int, int *);
 			if (procStruct->proargtypes[i] == ANYARRAYOID || \
 				procStruct->proargtypes[i] == ANYELEMENTOID) \
 			{ \
-				proargtypes_[i] = get_fn_expr_argtype(fcinfo, i); \
+				proargtypes_[i] = get_fn_expr_argtype(fcinfo->flinfo, i); \
 				if (proargtypes_[i] == InvalidOid) \
 					proargtypes_[i] = procStruct->proargtypes[i]; \
 			} \
