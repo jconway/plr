@@ -407,82 +407,84 @@ select pg_test_install('hello world');
         or zero if the query is a utility statement.  If the query is a
         <command>SELECT</command> statement, the values of the selected columns
         are placed in an R data.frame with the target column names used as
-        the frame column names.
+        the frame column names. However, non-numeric columns <emphasis>are
+        not</emphasis> converted to factors. If you want all non-numeric
+        columns converted to factors, a convenience function <function>
+        pg.spi.factor</function> (described below) is provided.
        </para>
 
        <para>
-        If a SELECT returns no rows, 
-.  For example,
-
-
-
-
-
-
-
-
-
-	<programlisting>
-spi_exec "SELECT count(*) AS cnt FROM pg_proc"
-	</programlisting>
-
-	will set the Tcl variable <literal>$cnt</> to the number of rows in
-	the <structname>pg_proc</> system catalog.
-       </para>
-       <para>
-        If the optional <replaceable>loop-body</> argument is given, it is
-	a piece of Tcl script that is executed once for each row in the
-	SELECT result (note: <replaceable>loop-body</> is ignored if the given
-	query is not a SELECT).  The values of the current row's fields
-	are stored into Tcl variables before each iteration.  For example,
-
-	<programlisting>
-spi_exec -array C "SELECT * FROM pg_class" {
-    elog DEBUG "have table $C(relname)"
-}
-	</programlisting>
-
-	will print a DEBUG log message for every row of pg_class.  This
-	feature works similarly to other Tcl looping constructs; in
-	particular <literal>continue</> and <literal>break</> work in the
-	usual way inside the loop body.
-       </para>
-       <para>
-        If a field of a SELECT result is NULL, the target
-	variable for it is <quote>unset</> rather than being set.
+        If a field of a SELECT result is NULL, the target variable for it
+        is set to <quote>NA</quote>. For example:
+        <programlisting>
+create or replace function test_spi_tup(text) returns record as 'pg.spi.exec(arg1)' language 'plr';
+regression=# select * from test_spi_tup('select oid, NULL::text as nullcol, typname from pg_type where typname = ''oid'' or typname = ''text''') as t(typeid oid, nullcol text, typename name);
+ typeid | nullcol | typename
+--------+---------+----------
+     25 |         | text
+     26 |         | oid
+(2 rows)
+        </programlisting>
+        The NULL values were passed to R as <quote>NA</quote>, and on return to
+        PostgreSQL they were converted back to NULL.
        </para>
       </listitem>
      </varlistentry>
 
      <varlistentry>
-      <term><function>spi_prepare</function> <replaceable>query</replaceable> <replaceable>typelist</replaceable></term>
+      <term><function>pg.spi.prepare</function>(
+                      <replaceable>query</replaceable>, 
+                      <replaceable>type_vector</replaceable>)</term>
       <listitem>
        <para>
-	Prepares and saves a query plan for later execution.  The saved plan
-	will be retained for the life of the current backend.
+        Prepares and saves a query plan for later execution. The saved plan
+        will be retained for the life of the current backend.
        </para>
+
        <para>
         The query may use <firstterm>arguments</>, which are placeholders for
-	values to be supplied whenever the plan is actually executed.
-	In the query string, refer to arguments
-	by the symbols <literal>$1</literal> ... <literal>$n</literal>.
-	If the query uses arguments, the names of the argument types
-	must be given as a Tcl list.  (Write an empty list for
-	<replaceable>typelist</replaceable> if no arguments are used.)
-	Presently, the argument types must be identified by the internal
-	type names shown in pg_type; for example <literal>int4</> not
-	<literal>integer</>.
+        values to be supplied whenever the plan is actually executed. In the
+        query string, refer to arguments by the symbols <literal>$1</literal>
+        ... <literal>$n</literal>. If the query uses arguments, the values of
+        the argument types must be given as vector. Pass an empty vector for
+        <replaceable>type vector</replaceable> if no arguments are used.
+        The argument types must be identified by the type Oids, shown
+        in pg_type. Global variables are provided for this use. They are
+        named according to the convention TYPENAMEOID, where the actual name of
+        the type, in all capitals, is substituted for TYPENAME. A support
+        function, <function>r_typenames()</function> can be used to list the
+        predefined Global variables:
+        <programlisting>
+regression=# select * from r_typenames();
+    typename     | typeoid
+-----------------+---------
+ ABSTIMEOID      |     702
+ ACLITEMOID      |    1033
+ ANYARRAYOID     |    2277
+ ANYOID          |    2276
+ BITOID          |    1560
+ BOOLOID         |      16
+  [...]
+ TRIGGEROID      |    2279
+ UNKNOWNOID      |     705
+ VARBITOID       |    1562
+ VARCHAROID      |    1043
+ VOIDOID         |    2278
+ XIDOID          |      28
+(59 rows)
+        </programlisting>
        </para>
+
        <para>
-        The return value from <function>spi_prepare</function> is a query ID
-	to be used in subsequent calls to <function>spi_execp</function>. See
-	<function>spi_execp</function> for an example.
+        The return value from <function>pg.spi.prepare</function> is a query ID
+        to be used in subsequent calls to <function>pg.spi.execp</function>. See
+        <function>spi_execp</function> for an example.
        </para>
       </listitem>
      </varlistentry>
 
      <varlistentry>
-      <term><function>spi_execp</> <literal>?-count <replaceable>n</replaceable>? ?-array <replaceable>name</replaceable>? ?-nulls <replaceable>string</replaceable>? <replaceable>queryid</replaceable> ?<replaceable>value-list</replaceable>? ?<replaceable>loop-body</replaceable>?</literal></term>
+      <term><function>pg.spi.execp</> <literal>?-count <replaceable>n</replaceable>? ?-array <replaceable>name</replaceable>? ?-nulls <replaceable>string</replaceable>? <replaceable>queryid</replaceable> ?<replaceable>value-list</replaceable>? ?<replaceable>loop-body</replaceable>?</literal></term>
       <listitem>
        <para>
 	Execute a query previously prepared with <function>spi_prepare</>.

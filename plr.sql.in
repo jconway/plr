@@ -25,3 +25,12 @@ CREATE OR REPLACE FUNCTION array_accum (_float8, float8)
 RETURNS float8[]
 AS 'MODULE_PATHNAME','array_accum'
 LANGUAGE 'C';
+
+CREATE TYPE r_typename AS (typename text, typeoid oid);
+CREATE OR REPLACE FUNCTION r_typenames()
+RETURNS SETOF r_typename AS '
+  x <- ls(name = .GlobalEnv, pat = "OID")
+  y <- vector()
+  for (i in 1:length(x)) {y[i] <- eval(parse(text = x[i]))}
+  data.frame(typename = x, typeoid = y)
+' language 'plr';
