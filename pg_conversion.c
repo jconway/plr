@@ -41,7 +41,7 @@ static SEXP get_r_vector(Oid typtype, int numels);
 static Datum get_tuplestore(SEXP rval, plr_proc_desc *prodesc, FunctionCallInfo fcinfo, bool *isnull);
 static Datum get_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull);
 static Datum get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull);
-static Datum get_matrix_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull);
+static Datum get_md_array_datum(SEXP rval, int ndims, plr_proc_desc *prodesc, bool *isnull);
 static Datum get_generic_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull);
 static Tuplestorestate *get_frame_tuplestore(SEXP rval,
 											 plr_proc_desc *prodesc,
@@ -67,16 +67,6 @@ pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func)
 {
 	SEXP		result;
 	char	   *value;
-
-	if (dvalue == (Datum) 0)
-	{
-		/* fast track for null arguments */
-		PROTECT(result = NEW_CHARACTER(1));
-		SET_STRING_ELT(result, 0, NA_STRING);
-		UNPROTECT(1);
-
-		return result;
-	}
 
 	value = DatumGetCString(FunctionCall3(&arg_out_func,
 										  dvalue,
@@ -117,10 +107,11 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	char	   *value;
 	ArrayType  *v = (ArrayType *) dvalue;
 	Oid			element_type;
-	int			i, j,
+	int			i, j, k,
 				nitems,
-				nr = 0,
-				nc = 0,
+				nr = 1,
+				nc = 1,
+				nz = 1,
 				ndim,
 			   *dim;
 	char	   *p;
@@ -141,15 +132,18 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 		return result;
 	}
 
-	if (ndim < 2)
-	{
+	if (ndim == 1)
 		nr = nitems;
-		nc = 1;
-	}
 	else if (ndim == 2)
 	{
 		nr = dim[0];
 		nc = dim[1];
+	}
+	else if (ndim == 3)
+	{
+		nr = dim[0];
+		nc = dim[1];
+		nz = dim[2];
 	}
 	else
 		elog(ERROR, "plr: 3 (or more) dimension arrays are not yet supported as function arguments");
@@ -163,33 +157,37 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	{
 		for (j = 0; j < nc; j++)
 		{
-			Datum		itemvalue;
-			int			idx = (j * nr) + i;
+			for (k = 0; k < nz; k++)
+			{
+				Datum		itemvalue;
+				int			idx = (k * nr * nc) + (j * nr) + i;
 
-			itemvalue = fetch_att(p, typbyval, typlen);
-			value = DatumGetCString(FunctionCall3(&out_func,
-													  itemvalue,
-													  (Datum) 0,
-													  Int32GetDatum(-1)));
-			p = att_addlength(p, typlen, PointerGetDatum(p));
-			p = (char *) att_align(p, typalign);
+				itemvalue = fetch_att(p, typbyval, typlen);
+				value = DatumGetCString(FunctionCall3(&out_func,
+														  itemvalue,
+														  (Datum) 0,
+														  Int32GetDatum(-1)));
+				p = att_addlength(p, typlen, PointerGetDatum(p));
+				p = (char *) att_align(p, typalign);
 
-			if (value != NULL)
-				pg_get_one_r(value, element_type, &result, idx);
-			else
-				SET_STRING_ELT(result, idx, NA_STRING);
+				if (value != NULL)
+					pg_get_one_r(value, element_type, &result, idx);
+				else
+					SET_STRING_ELT(result, idx, NA_STRING);
+			}
 		}
 	}
 	UNPROTECT(1);
 
-	if (ndim == 2)
+	if (ndim > 1)
 	{
 		SEXP	matrix_dims;
 
 		/* attach dimensions */
-		PROTECT(matrix_dims = allocVector(INTSXP, 2));
-		INTEGER_DATA(matrix_dims)[0] = dim[0];
-		INTEGER_DATA(matrix_dims)[1] = dim[1];
+		PROTECT(matrix_dims = allocVector(INTSXP, ndim));
+		for (i = 0; i < ndim; i++)
+			INTEGER_DATA(matrix_dims)[i] = dim[i];
+
 		setAttrib(result, R_DimSymbol, matrix_dims);
 		UNPROTECT(1);
 	}
@@ -557,12 +555,25 @@ get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem, bool *isnu
 static Datum
 get_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
 {
+	SEXP	rdims;
+	int		ndims;
+
+	/* two supported special cases */
 	if (isFrame(rval))
 		return get_frame_array_datum(rval, prodesc, isnull);
 	else if (isMatrix(rval))
-		return get_matrix_array_datum(rval, prodesc, isnull);
-	else
-		return get_generic_array_datum(rval, prodesc, isnull);
+		return get_md_array_datum(rval, 2 /* matrix is 2D */, prodesc, isnull);
+
+	PROTECT(rdims = getAttrib(rval, R_DimSymbol));
+	ndims = length(rdims);
+	UNPROTECT(1);
+
+	/* 2D and 3D arrays are specifically supported too */
+	if (ndims == 2 || ndims == 3)
+		return get_md_array_datum(rval, ndims, prodesc, isnull);
+
+	/* everything else */
+	return get_generic_array_datum(rval, prodesc, isnull);
 }
 
 static Datum
@@ -657,60 +668,89 @@ get_frame_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
 }
 
 static Datum
-get_matrix_array_datum(SEXP rval, plr_proc_desc *prodesc, bool *isnull)
+get_md_array_datum(SEXP rval, int ndims, plr_proc_desc *prodesc, bool *isnull)
 {
 	Datum		dvalue;
 	SEXP		obj;
+	SEXP		rdims;
 	char	   *value;
 	Oid			result_elem = prodesc->result_elem;
 	FmgrInfo	in_func = prodesc->result_elem_in_func;
 	int			typlen = prodesc->result_elem_typlen;
 	bool		typbyval = prodesc->result_elem_typbyval;
 	char		typalign = prodesc->result_elem_typalign;
-	int			i;
+	int			i, j, k;
 	Datum	   *dvalues = NULL;
 	ArrayType  *array;
-
-	int			nr = nrows(rval);
-	int			nc = ncols(rval);
-	int			ndims = 2;
+	int			nitems;
+	int			nr = 1;
+	int			nc = 1;
+	int			nz = 1;
 	int			ndatabytes;
 	int			nbytes;
 	ArrayType  *tmparray;
 	int			dims[ndims];
 	int			lbs[ndims];
 	int			idx;
+	int			cntr = 0;
 
-	dims[0] = nr;
-	dims[1] = nc;
-	lbs[0] = 1;
-	lbs[1] = 1;
+	PROTECT(rdims = getAttrib(rval, R_DimSymbol));
+	for(i = 0; i < ndims; i++)
+	{
+		dims[i] = INTEGER(rdims)[i];
+		lbs[i] = 1;
 
-	dvalues = (Datum *) palloc(nr * nc * sizeof(Datum));
+		switch (i)
+		{
+			case 0:
+				nr = dims[i];
+			    break;
+			case 1:
+				nc = dims[i];
+			    break;
+			case 2:
+				nz = dims[i];
+			    break;
+			default:
+				/* anything higher is currently unsupported */
+				elog(ERROR, "plr: returning arrays of greater than 3 " \
+							"dimensions is currently not supported");
+		}
+
+	}
+	UNPROTECT(1);
+
+	nitems = nr * nc * nz;
+	dvalues = (Datum *) palloc(nitems * sizeof(Datum));
 	PROTECT(obj =  AS_CHARACTER(rval));
 
-	/* Loop is needed here as result value might be of length > 1 */
-	for(i = 0; i < nr * nc; i++)
+	for (i = 0; i < nr; i++)
 	{
-		value = CHAR(STRING_ELT(obj, i));
-		idx = ((i % nr) * nc) + (i / nr);
+		for (j = 0; j < nc; j++)
+		{
+			for (k = 0; k < nz; k++)
+			{
+				idx = (k * nr * nc) + (j * nr) + i;
+				value = CHAR(STRING_ELT(obj, idx));
 
-		if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
-			elog(ERROR, "plr: cannot return array with NULL elements");
-		else
-			dvalues[idx] = FunctionCall3(&in_func,
-									CStringGetDatum(value),
-									(Datum) 0,
-									Int32GetDatum(-1));
-    }
+				if (STRING_ELT(obj, idx) == NA_STRING || value == NULL)
+					elog(ERROR, "plr: cannot return array with NULL elements");
+				else
+					dvalues[cntr++] = FunctionCall3(&in_func,
+											CStringGetDatum(value),
+											(Datum) 0,
+											Int32GetDatum(-1));
+			}
+		}
+	}
 	UNPROTECT(1);
 
 	/* build up 1d array */
-	array = construct_array(dvalues, nr * nc, result_elem, typlen, typbyval, typalign);
+	array = construct_array(dvalues, nitems, result_elem, typlen, typbyval, typalign);
 
-	/* convert it to a 2d array */
+	/* convert it to a {ndims}d array */
 	ndatabytes = ARR_SIZE(array) - ARR_OVERHEAD(1);
-	nbytes = ndatabytes + ARR_OVERHEAD(2);
+	nbytes = ndatabytes + ARR_OVERHEAD(ndims);
 	tmparray = (ArrayType *) palloc(nbytes);
 
 	tmparray->size = nbytes;
