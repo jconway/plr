@@ -63,6 +63,7 @@
  * Global data
  */
 static bool plr_firstcall = true;
+static bool	plr_interp_started = false;
 static int plr_call_level = 0;
 static FunctionCallInfo plr_current_fcinfo = NULL;
 static HTAB *plr_HashTable;
@@ -199,6 +200,7 @@ static void perm_fmgr_info(Oid functionId, FmgrInfo *finfo);
 static char *get_lib_pathstr(Oid funcid);
 static char *get_load_self_ref_cmd(Oid funcid);
 static void load_r_cmd(const char *cmd);
+static void start_interp(void);
 static void plr_init_interp(Oid funcid);
 static void plr_init_all(Oid funcid);
 static void plr_init_load_modules(void);
@@ -226,15 +228,23 @@ static bool file_exists(const char *name);
 /*
  * external declarations
  */
+
+/* GUC variable */
 extern char *Dynamic_library_path;
 
+/* libR interpreter initialization */
 extern int Rf_initEmbeddedR(int argc, char **argv);
+
+/* PL/R language handler */
 extern Datum plr_call_handler(PG_FUNCTION_ARGS);
 
+/* Postgres support functions installed into the R interpreter */
 extern void throw_pg_error(const char **msg);
 extern SEXP plr_quote_literal(SEXP rawstr);
 extern SEXP plr_quote_ident(SEXP rawstr);
 
+/* Postgres callable functions useful in conjunction with PL/R */
+extern Datum install_rcmd(PG_FUNCTION_ARGS);
 extern Datum array_push(PG_FUNCTION_ARGS);
 extern Datum array(PG_FUNCTION_ARGS);
 extern Datum array_accum(PG_FUNCTION_ARGS);
@@ -299,17 +309,6 @@ plr_call_handler(PG_FUNCTION_ARGS)
 	return retval;
 }
 
-/*
- * This routine is a crock, and so is everyplace that calls it.  The problem
- * is that the cached form of pltcl functions/queries is allocated permanently
- * (mostly via malloc()) and never released until backend exit.  Subsidiary
- * data structures such as fmgr info records therefore must live forever
- * as well.  A better implementation would store all this stuff in a per-
- * function memory context that could be reclaimed at need.  In the meantime,
- * fmgr_info_cxt must be called specifying TopMemoryContext so that whatever
- * it might allocate, and whatever the eventual function might allocate using
- * fn_mcxt, will live forever too.
- */
 static void
 perm_fmgr_info(Oid functionId, FmgrInfo *finfo)
 {
@@ -393,6 +392,10 @@ load_r_cmd(const char *cmd)
 	int			i,
 				status;
 
+	/* start EmbeddedR if not already done */
+	if (plr_interp_started == false)
+		start_interp();
+
 	PROTECT(cmdSexp = NEW_CHARACTER(1));
 	SET_STRING_ELT(cmdSexp, 0, COPY_TO_USER_STRING(cmd));
 	PROTECT(cmdexpr = R_ParseVector(cmdSexp, -1, &status));
@@ -407,13 +410,29 @@ load_r_cmd(const char *cmd)
 }
 
 /*
+ * start_interp() - start embedded R
+ */
+static void
+start_interp(void)
+{
+	int			argc;
+	char	   *argv[] = {"PL/R", "--gui=none", "--silent", "--no-save"};
+
+	/* refuse to start more than once */
+	if (plr_interp_started == true)
+		return;
+
+	argc = sizeof(argv)/sizeof(argv[0]);
+	Rf_initEmbeddedR(argc, argv);
+	plr_interp_started = true;
+}
+
+/*
  * plr_init_interp() - initialize an R interpreter
  */
 static void
 plr_init_interp(Oid funcid)
 {
-	int			argc;
-	char	   *argv[] = {"PL/R", "--gui=none", "--silent", "--no-save"};
 	int			j;
 	char	   *cmd;
 	char	   *cmds[] =
@@ -440,9 +459,9 @@ plr_init_interp(Oid funcid)
 		NULL
 	};
 
-	/* start EmbeddedR */
-	argc = sizeof(argv)/sizeof(argv[0]);
-	Rf_initEmbeddedR(argc, argv);
+	/* start EmbeddedR if not already done */
+	if (plr_interp_started == false)
+		start_interp();
 
 	/*
 	 * temporarily turn off R error reporting -- it will be turned back on
@@ -1598,6 +1617,23 @@ plr_quote_ident(SEXP rval)
  *****************************************************************************/
 
 /*-----------------------------------------------------------------------------
+ * install_rcmd :
+ *		interface to allow user defined R functions to be called from other
+ *		R functions
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(install_rcmd);
+Datum
+install_rcmd(PG_FUNCTION_ARGS)
+{
+	char *cmd = PG_TEXT_GET_STR(PG_GETARG_TEXT_P(0));
+
+	load_r_cmd(cmd);
+
+	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
+}
+
+/*-----------------------------------------------------------------------------
  * array :
  *		form a one-dimensional array given starting elements
  *----------------------------------------------------------------------------
@@ -1622,8 +1658,8 @@ PG_FUNCTION_INFO_V1(array_push);
 Datum
 array_push(PG_FUNCTION_ARGS)
 {
-	ArrayType  *v = PG_GETARG_ARRAYTYPE_P(0);
-	Datum		newelem = PG_GETARG_DATUM(1);
+	ArrayType  *v;
+	Datum		newelem;
 	int		   *dimv,
 			   *lb, ub;
 	ArrayType  *result;
@@ -1636,6 +1672,17 @@ array_push(PG_FUNCTION_ARGS)
 	Oid			typinput,
 				typelem;
 	char		typalign;
+
+	/* return NULL if first argument is NULL */
+	if (PG_ARGISNULL(0))
+		PG_RETURN_NULL();
+
+	/* return the first argument if the second is NULL */
+	if (PG_ARGISNULL(1))
+		PG_RETURN_ARRAYTYPE_P(PG_GETARG_ARRAYTYPE_P_COPY(0));
+
+	v = PG_GETARG_ARRAYTYPE_P(0);
+	newelem = PG_GETARG_DATUM(1);
 
 	/* Sanity check: do we have a one-dimensional array */
 	if (ARR_NDIM(v) != 1)
@@ -1671,14 +1718,26 @@ PG_FUNCTION_INFO_V1(array_accum);
 Datum
 array_accum(PG_FUNCTION_ARGS)
 {
-	Datum		v = PG_GETARG_DATUM(0);
-	Datum		newelem = PG_GETARG_DATUM(1);
+	Datum		v;
+	Datum		newelem;
 	ArrayType  *result;
 
+	/* return NULL if both arguments are NULL */
+	if (PG_ARGISNULL(0) && PG_ARGISNULL(1))
+		PG_RETURN_NULL();
+
+	/* create a new array from the second argument if first is NULL */
 	if (PG_ARGISNULL(0))
-		result = array_create(fcinfo, 1, 1);
-	else
-		result = DatumGetArrayTypeP(DirectFunctionCall2(array_push, v, newelem));
+		PG_RETURN_ARRAYTYPE_P(array_create(fcinfo, 1, 1));
+
+	/* return the first argument if the second is NULL */
+	if (PG_ARGISNULL(1))
+		PG_RETURN_ARRAYTYPE_P(PG_GETARG_ARRAYTYPE_P_COPY(0));
+
+	v = PG_GETARG_DATUM(0);
+	newelem = PG_GETARG_DATUM(1);
+
+	result = DatumGetArrayTypeP(DirectFunctionCall2(array_push, v, newelem));
 
 	PG_RETURN_ARRAYTYPE_P(result);
 }

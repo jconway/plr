@@ -1,12 +1,11 @@
 /*
- * dblink
+ * plr - PostgreSQL support for R as a
+ *	     procedural language (PL)
  *
- * Functions returning results from a remote database
- *
- * Joe Conway <mail@joeconway.com>
- *
- * Copyright (c) 2001, 2002 by PostgreSQL Global Development Group
+ * Copyright (c) 2003 by Joseph E. Conway
  * ALL RIGHTS RESERVED;
+ * 
+ * Joe Conway <mail@joeconway.com>
  * 
  * Permission to use, copy, modify, and distribute this software and its
  * documentation for any purpose, without fee, and without a written agreement
@@ -27,127 +26,33 @@
  *
  */
 
-Version 0.5 (25 August, 2002):
-  Major overhaul to work with new backend "table function" capability. Removed
-  dblink_strtok() and dblink_replace() functions because they are now
-  available as backend functions (split() and replace() respectively).
-  Tested under Linux (Red Hat 7.3) and PostgreSQL 7.3devel. This version
-  is no longer backwards portable to PostgreSQL 7.2.
-
-Release Notes:
-  Version 0.5
-    - dblink now supports use directly as a table function; this is the new
-      preferred usage going forward
-    - Use of dblink_tok is now deprecated; original form of dblink is also
-      deprecated. They _will_ be removed in the next version.
-    - dblink_last_oid is also deprecated; use dblink_exec() which returns
-      the command status as a single row, single column result.
-    - Original dblink, dblink_tok, and dblink_last_oid are commented out in
-      dblink.sql; remove the comments to use the deprecated functions.
-    - dblink_strtok() and dblink_replace() functions were removed. Use
-      split() and replace() respectively (new backend functions in
-      PostgreSQL 7.3) instead.
-    - New functions: dblink_exec() for non-SELECT queries; dblink_connect()
-      opens connection that persists for duration of a backend;
-      dblink_disconnect() closes a persistent connection; dblink_open()
-      opens a cursor; dblink_fetch() fetches results from an open cursor.
-      dblink_close() closes a cursor.
-    - New test suite: dblink_check.sh, dblink.test.sql,
-      dblink.test.expected.out. Execute dblink_check.sh from the same
-      directory as the other two files. Output is dblink.test.out and
-      dblink.test.diff. Note that dblink.test.sql is a good source
-      of example usage.
-
-  Version 0.4
-    - removed cursor wrap around input sql to allow for remote
-      execution of INSERT/UPDATE/DELETE
-	- dblink now returns a resource id instead of a real pointer
-    - added several utility functions -- see below
-
-  Version 0.3
-    - fixed dblink invalid pointer causing corrupt elog message
-    - fixed dblink_tok improper handling of null results
-    - fixed examples in README.dblink
-
-  Version 0.2
+Version 0.1 (31 January, 2003):
     - initial release    
 
 Installation:
-  Place these files in a directory called 'dblink' under 'contrib' in the PostgreSQL source tree. Then run:
+  Place these files in a directory called 'plr' under 'contrib' in the
+  PostgreSQL source tree. Then run:
 
     make
     make install
 
-  You can use dblink.sql to create the functions in your database of choice, e.g.
+  You can use plr.sql to create the functions in your database of choice, e.g.
 
-    psql -U postgres template1 < dblink.sql
+    psql mydatabase < plr.sql
 
-  installs following functions into database template1:
+  installs following functions into the database:
 
-     connection
-     ------------
-     dblink_connect(text) RETURNS text
-       - opens a connection that will persist for duration of current
-         backend or until it is disconnected
-     dblink_disconnect() RETURNS text
-       - disconnects a persistent connection
+     plr_call_handler()
+       - the PL/R PostgreSQL language handler
+     array(float8 <element>) RETURNS float8[], NULL on NULL input
+       - creates a float8 array from <element>
+     array_push(float8[] <array>, float8 <element>) RETURNS float8[],
+       NULL on NULL input
+       - adds <element> to the end of <array>
+     array_accum(float8[] <array>, float8 <element>) RETURNS float8[],
+       NULL on NULL <element>, creates new array on NULL <array>
+       - adds <element> to the end of <array>
 
-     cursor
-     ------------
-     dblink_open(text,text) RETURNS text
-       - opens a cursor using connection already opened with dblink_connect()
-         that will persist for duration of current backend or until it is
-         closed
-     dblink_fetch(text, int) RETURNS setof record
-       - fetches data from an already opened cursor
-     dblink_close(text) RETURNS text
-       - closes a cursor
-
-     query
-     ------------
-     dblink(text,text) RETURNS setof record
-       - returns a set of results from remote SELECT query
-         (Note: comment out in dblink.sql to use deprecated version)
-     dblink(text) RETURNS setof record
-       - returns a set of results from remote SELECT query, using connection
-         already opened with dblink_connect()
-
-     execute
-     ------------
-     dblink_exec(text, text) RETURNS text
-       - executes an INSERT/UPDATE/DELETE query remotely
-     dblink_exec(text) RETURNS text
-       - executes an INSERT/UPDATE/DELETE query remotely, using connection
-         already opened with dblink_connect()
-
-     misc
-     ------------
-     dblink_current_query() RETURNS text
-       - returns the current query string
-     dblink_get_pkey(text) RETURNS setof text
-       - returns the field names of a relation's primary key fields
-     dblink_build_sql_insert(text,int2vector,int2,_text,_text) RETURNS text
-       - builds an insert statement using a local tuple, replacing the
-         selection key field values with alternate supplied values
-     dblink_build_sql_delete(text,int2vector,int2,_text) RETURNS text
-       - builds a delete statement using supplied values for selection
-         key field values
-     dblink_build_sql_update(text,int2vector,int2,_text,_text) RETURNS text
-       - builds an update statement using a local tuple, replacing the
-         selection key field values with alternate supplied values
-
-  Not installed by default
-     deprecated
-     ------------
-     dblink(text,text) RETURNS setof int
-       - *DEPRECATED* returns a resource id for results from remote query
-         (Note: must uncomment in dblink.sql to use)
-     dblink_tok(int,int) RETURNS text
-       - *DEPRECATED* extracts and returns individual field results; used
-         only in conjunction with the *DEPRECATED* form of dblink
-         (Note: must uncomment in dblink.sql to use)
-     dblink_last_oid(int) RETURNS oid
-       - *DEPRECATED* returns the last inserted oid
 
 Documentation:
 
@@ -156,12 +61,9 @@ Documentation:
      must also be appropriately qualified with schema name if applicable.
 
   See the following files:
-     doc/connection
-     doc/cursor
-     doc/query
-     doc/execute
-     doc/misc
-     doc/deprecated
+     doc/plr
+     doc/R_support
+     doc/pg_support
 
 ==================================================================
 -- Joe Conway

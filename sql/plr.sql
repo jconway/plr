@@ -1,11 +1,33 @@
 --
 -- first, define the language and functions.  Turn off echoing so that expected file
--- does not depend on contents of tablefunc.sql.
+-- does not depend on contents of plr.sql.
 --
 \set ECHO none
 \i plr.sql
 \set ECHO all
 
+CREATE TABLE plr_modules (
+  modseq int4,
+  modsrc text
+);
+INSERT INTO plr_modules VALUES (0, 'pg_test_module_load <-function(msg) {print(msg)}');
+
+--
+-- plr_modules test
+--
+create or replace function pg_test_module_load(text) returns text as 'pg_test_module_load(arg1)' language 'plr';
+select pg_test_module_load('hello world');
+
+--
+-- user defined R function test
+--
+select install_rcmd('pg_test_install <-function(msg) {print(msg)}');
+create or replace function pg_test_install(text) returns text as 'pg_test_install(arg1)' language 'plr';
+select pg_test_install('hello world');
+
+--
+-- a variety of plr functions
+--
 create or replace function throw_error(text) returns text as 'pg_throw_error(arg1)' language 'plr';
 select throw_error('hello');
 
@@ -59,6 +81,9 @@ select sprintf('%s is %f feet tall', 'Sven', '7') as error;
 -- this one works
 select sprintf('%s is %s feet tall', 'Sven', '7');
 
+--
+-- test aggregates
+--
 create table foo(f1 text, f2 float8);
 insert into foo values('cat1',1.21);
 insert into foo values('cat1',1.24);
@@ -70,9 +95,6 @@ insert into foo values('cat2',1.26);
 insert into foo values('cat2',1.32);
 insert into foo values('cat2',1.30);
 
---
--- test aggregates
---
 create or replace function r_median(_float8) returns float as 'median(arg1)' language 'plr';
 select r_median('{1.23,1.31,1.42,1.27}'::_float8);
 CREATE AGGREGATE median (sfunc = array_accum, basetype = float8, stype = _float8, finalfunc = r_median);
