@@ -616,7 +616,12 @@ compile_plr_function(Oid fn_oid, bool is_trigger)
 
 			prodesc->result_typid = procStruct->prorettype;
 			perm_fmgr_info(typeStruct->typinput, &(prodesc->result_in_func));
-			prodesc->result_elem = typeStruct->typelem;
+
+			/* special case -- NAME looks like an array, but treat as a scalar */
+			if (prodesc->result_typid == NAMEOID)
+				prodesc->result_elem = 0;
+			else
+				prodesc->result_elem = typeStruct->typelem;
 
 			ReleaseSysCache(typeTup);
 
