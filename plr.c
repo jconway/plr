@@ -1063,7 +1063,7 @@ do_compile(FunctionCallInfo fcinfo,
 		/* trigger procedure has fixed args */
 		appendStringInfo(proc_internal_args,
 						"pg.tg.name,pg.tg.relid,pg.tg.relname,pg.tg.when," \
-						"pg.tg.level,pg.tg.op,pg.tg.new,pg.tg.old,pg.args");
+						"pg.tg.level,pg.tg.op,pg.tg.new,pg.tg.old,pg.tg.args");
 	}
 
 	/*
