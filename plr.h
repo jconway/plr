@@ -48,6 +48,7 @@
 #include "catalog/pg_type.h"
 #include "commands/trigger.h"
 #include "executor/spi.h"
+#include "lib/stringinfo.h"
 #include "nodes/makefuncs.h"
 #include "parser/parse_type.h"
 #include "tcop/tcopprot.h"
