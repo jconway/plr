@@ -29,6 +29,6 @@ SHLIB_LINK	:= -L$(r_libdir) -lR
 DATA_built	:= plr.sql 
 DOCS		:= README.plr
 REGRESS		:= plr
-EXTRA_CLEAN	:= *.html HTML.index doc/*.html doc/HTML.index
+EXTRA_CLEAN	:= doc/HTML.index
 
 include $(top_srcdir)/contrib/contrib-global.mk
