@@ -1853,8 +1853,14 @@ char *
 get_load_self_ref_cmd(Oid funcid)
 {
 	char   *libstr = get_lib_pathstr(funcid);
-	char   *buf = (char *) palloc(strlen(libstr) + 12 + 1);
+	char   *buf = NULL;
 
+	if (libstr)
+		buf = (char *) palloc(strlen(libstr) + 12 + 1);
+	else
+		ereport(ERROR,
+			(errcode_for_file_access(),
+			errmsg("could not find path to PL/R shared library")));
 	sprintf(buf, "dyn.load(\"%s\")", libstr);
 	return buf;
 }
