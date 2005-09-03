@@ -32,6 +32,7 @@
  */
 #include "plr.h"
 #include "storage/ipc.h"
+#include "utils/memutils.h"
 
 #if defined(PG_VERSION_80_COMPAT) || defined(PG_VERSION_81_COMPAT)
 #include "utils/typcache.h"

@@ -74,11 +74,7 @@ select round(sd('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
 create or replace function mean(_float8) returns float as '' language 'plr';
 select mean('{1.23,1.31,1.42,1.27}'::_float8);
 
--- generates appropriate error message
 create or replace function sprintf(text,text,text) returns text as 'sprintf(arg1,arg2,arg3)' language 'plr';
-select sprintf('%s is %f feet tall', 'Sven', '7') as error;
-
--- this one works
 select sprintf('%s is %s feet tall', 'Sven', '7');
 
 --

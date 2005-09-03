@@ -33,6 +33,7 @@
 #include "plr.h"
 
 #include "optimizer/clauses.h"
+#include "utils/memutils.h"
 
 /* Example format: "/usr/local/pgsql/lib" */
 #ifndef PKGLIBDIR
@@ -1843,6 +1844,8 @@ get_lib_pathstr(Oid funcid)
 	tmp = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_probin, &isnull);
 	raw_path = DatumGetCString(DirectFunctionCall1(byteaout, tmp));
 	cooked_path = expand_dynamic_library_name(raw_path);
+	if (!cooked_path)
+		cooked_path = pstrdup(raw_path);
 
 	ReleaseSysCache(procedureTuple);
 
@@ -1888,6 +1891,10 @@ file_exists(const char *name)
 
 	return false;
 }
+
+#ifndef DLSUFFIX
+#error "DLSUFFIX must be defined to compile this file."
+#endif
 
 /*
  * If name contains a slash, check if the file exists, if so return

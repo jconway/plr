@@ -31,6 +31,7 @@
  * pg_rsupport.c - Postgres support for use within plr functions
  */
 #include "plr.h"
+#include "utils/memutils.h"
 
 extern MemoryContext plr_SPI_context;
 extern char *last_R_error_msg;
