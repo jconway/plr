@@ -29,10 +29,6 @@ endif
 # to work without, we have to skip it.
 ifneq (,$(findstring yes, $(shared_libr)$(allow_nonpic_in_shlib)))
 
-override CPPFLAGS := -I$(srcdir) -I$(r_includespec) $(CPPFLAGS)
-override CPPFLAGS += -DPKGLIBDIR=\"$(pkglibdir)\" -DDLSUFFIX=\"$(DLSUFFIX)\"
-rpath :=
-
 MODULE_big	:= plr
 PG_CPPFLAGS	+= -I$(r_includespec)
 SRCS		+= plr.c pg_conversion.c pg_backend_support.c pg_userfuncs.c pg_rsupport.c
@@ -45,6 +41,10 @@ REGRESS		:= plr
 EXTRA_CLEAN	:= doc/HTML.index expected/plr.out
 
 include $(top_srcdir)/contrib/contrib-global.mk
+
+override CPPFLAGS := -I$(srcdir) -I$(r_includespec) $(CPPFLAGS)
+override CPPFLAGS += -DPKGLIBDIR=\"$(pkglibdir)\" -DDLSUFFIX=\"$(DLSUFFIX)\"
+rpath :=
 
 installcheck: plrinstallcheck
 
