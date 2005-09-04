@@ -32,6 +32,7 @@
  */
 #include "plr.h"
 
+#include "miscadmin.h"
 #include "optimizer/clauses.h"
 #include "utils/memutils.h"
 
@@ -1954,6 +1955,7 @@ expand_dynamic_library_name(const char *name)
 }
 
 
+#if defined(PG_VERSION_73_COMPAT) || defined(PG_VERSION_74_COMPAT)
 /*
  * Substitute for any macros appearing in the given string.
  * Result is always freshly palloc'd.
@@ -1993,6 +1995,41 @@ substitute_libpath_macro(const char *name)
 	}
 }
 
+#else
+
+/*
+ * Substitute for any macros appearing in the given string.
+ * Result is always freshly palloc'd.
+ */
+static char *
+substitute_libpath_macro(const char *name)
+{
+	const char *sep_ptr;
+	char	   *ret;
+
+	AssertArg(name != NULL);
+
+	if (name[0] != '$')
+		return pstrdup(name);
+
+	if ((sep_ptr = first_dir_separator(name)) == NULL)
+		sep_ptr = name + strlen(name);
+
+	if (strlen("$libdir") != sep_ptr - name ||
+		strncmp(name, "$libdir", strlen("$libdir")) != 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_NAME),
+				errmsg("invalid macro name in dynamic library path: %s", name)));
+
+	ret = palloc(strlen(pkglib_path) + strlen(sep_ptr) + 1);
+
+	strcpy(ret, pkglib_path);
+	strcat(ret, sep_ptr);
+
+	return ret;
+}
+
+#endif /* PG_VERSION_73_COMPAT || PG_VERSION_74_COMPAT */
 
 /*
  * Search for a file called 'basename' in the colon-separated search

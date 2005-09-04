@@ -43,13 +43,14 @@ EXTRA_CLEAN	:= doc/HTML.index expected/plr.out
 PGXS := $(shell pg_config --pgxs)
 include $(PGXS)
 
-installcheck: submake
+installcheck: plrinstallcheck
+
+plrinstallcheck:
 ifeq ($(findstring 7.3,$(VERSION)),7.3)
-	cp -f $(top_builddir)/$(subdir)/expected/plr.out.7.3 $(top_builddir)/$(subdir)/expected/plr.out
+	cp -f expected/plr.out.7.3 expected/plr.out
 else
-	cp -f $(top_builddir)/$(subdir)/expected/plr.out.7.4 $(top_builddir)/$(subdir)/expected/plr.out
+	cp -f expected/plr.out.7.4 expected/plr.out
 endif
-	$(top_builddir)/src/test/regress/pg_regress $(REGRESS)
 
 else # can't build
 
