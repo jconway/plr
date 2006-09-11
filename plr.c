@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2006 by Joseph E. Conway
+ * Copyright (c) 2003, 2004 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -34,9 +34,10 @@
 #include "catalog/pg_namespace.h"
 #include "storage/ipc.h"
 #include "utils/memutils.h"
-#include "utils/typcache.h"
 
-PG_MODULE_MAGIC;
+#if defined(PG_VERSION_80_COMPAT) || defined(PG_VERSION_81_COMPAT)
+#include "utils/typcache.h"
+#endif /* PG_VERSION_80_COMPAT || PG_VERSION_81_COMPAT */
 
 /*
  * Global data
@@ -47,8 +48,6 @@ char *last_R_error_msg = NULL;
 
 static bool	plr_pm_init_done = false;
 static bool	plr_be_init_done = false;
-
-/* namespace OID for the PL/R language handler function */
 static Oid plr_nspOid = InvalidOid;
 
 /*
@@ -118,15 +117,18 @@ static Datum plr_trigger_handler(PG_FUNCTION_ARGS);
 static Datum plr_func_handler(PG_FUNCTION_ARGS);
 static plr_function *compile_plr_function(FunctionCallInfo fcinfo);
 static plr_function *do_compile(FunctionCallInfo fcinfo,
-								HeapTuple procTup,
-								plr_func_hashkey *hashkey);
+							    HeapTuple procTup,
+							    plr_func_hashkey *hashkey);
 static SEXP plr_parse_func_body(const char *body);
 static SEXP plr_convertargs(plr_function *function, Datum *arg, bool *argnull);
 static void plr_error_callback(void *arg);
 static Oid getNamespaceOidFromFunctionOid(Oid fnOid);
 static bool haveModulesTable(Oid nspOid);
-static char *getModulesSql(Oid nspOid);
+static char* getModulesSql(Oid nspOid);
+
+#if defined(PG_VERSION_80_COMPAT) || defined(PG_VERSION_81_COMPAT)
 static char **fetchArgNames(HeapTuple procTup, int nargs);
+#endif /* PG_VERSION_80_COMPAT || PG_VERSION_81_COMPAT */
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -197,7 +199,7 @@ load_r_cmd(const char *cmd)
 	SET_STRING_ELT(cmdSexp, 0, COPY_TO_USER_STRING(cmd));
 	PROTECT(cmdexpr = R_PARSEVECTOR(cmdSexp, -1, &status));
 	if (status != PARSE_OK) {
-		UNPROTECT(2);
+	    UNPROTECT(2);
 		if (last_R_error_msg)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_EXCEPTION),
@@ -565,7 +567,7 @@ plr_trigger_handler(PG_FUNCTION_ARGS)
 
 	dims[0] = trigdata->tg_trigger->tgnargs;
 	lbs[0] = 1;
-	array = construct_md_array(dvalues, NULL, ndims, dims, lbs,
+	array = construct_md_array(dvalues, ndims, dims, lbs,
 								TEXTOID, -1, false, 'i');
 
 	arg[8] = PointerGetDatum(array);
@@ -1142,7 +1144,7 @@ do_compile(FunctionCallInfo fcinfo,
 
 		/* trigger procedure has fixed args */
 		appendStringInfo(proc_internal_args,
-						"pg.tg.name,pg.tg.relid,pg.tg.relname,pg.tg.when,"
+						"pg.tg.name,pg.tg.relid,pg.tg.relname,pg.tg.when," \
 						"pg.tg.level,pg.tg.op,pg.tg.new,pg.tg.old,pg.tg.args");
 	}
 
@@ -1209,7 +1211,7 @@ plr_parse_func_body(const char *body)
 	PROTECT(fun = VECTOR_ELT(R_PARSEVECTOR(rbody, -1, &status), 0));
 	if (status != PARSE_OK)
 	{
-		UNPROTECT(2);
+	    UNPROTECT(2);
 		if (last_R_error_msg)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_EXCEPTION),
@@ -1342,6 +1344,7 @@ plr_error_callback(void *arg)
 		errcontext("In PL/R function %s", (char *) arg);
 }
 
+#if defined(PG_VERSION_80_COMPAT) || defined(PG_VERSION_81_COMPAT)
 /*
  * Fetch the argument names, if any, from the proargnames field of the
  * pg_proc tuple.  Results are palloc'd.
@@ -1368,7 +1371,7 @@ fetchArgNames(HeapTuple procTup, int nargs)
 
 	deconstruct_array(DatumGetArrayTypeP(argnamesDatum),
 					  TEXTOID, -1, false, 'i',
-					  &elems, NULL, &nelems);
+					  &elems, &nelems);
 
 	if (nelems != nargs)		/* should not happen */
 		elog(ERROR, "proargnames must have the same number of elements as the function has arguments");
@@ -1380,6 +1383,7 @@ fetchArgNames(HeapTuple procTup, int nargs)
 
 	return result;
 }
+#endif /* PG_VERSION_80_COMPAT || PG_VERSION_81_COMPAT */
 
 /*
  * getNamespaceOidFromFunctionOid - Returns the OID of the namespace for the
@@ -1388,9 +1392,9 @@ fetchArgNames(HeapTuple procTup, int nargs)
 static Oid
 getNamespaceOidFromFunctionOid(Oid fnOid)
 {
-	HeapTuple    procTuple;
-	Form_pg_proc procStruct;
-	Oid          nspOid;
+	HeapTuple		procTuple;
+	Form_pg_proc	procStruct;
+	Oid				nspOid;
 
 	/* Lookup the pg_proc tuple by OID */
 	procTuple = SearchSysCache(PROCOID, ObjectIdGetDatum(fnOid), 0, 0, 0);
@@ -1413,17 +1417,21 @@ getNamespaceOidFromFunctionOid(Oid fnOid)
 static bool
 haveModulesTable(Oid nspOid)
 {
-	StringInfo		sql = makeStringInfo();
-	char		   *sql_format = "SELECT NULL "
-								 "FROM pg_catalog.pg_class "
-								 "WHERE "
-								 "relname = 'plr_modules' AND "
-								 "relnamespace = %u";
-    int  spiRc;
+	static const char sqlFormat[] = "SELECT NULL "
+									"FROM pg_catalog.pg_class "
+									"WHERE "
+									"relname = 'plr_modules' AND "
+									"relnamespace = %u";
+	char	   *sql;
+	int			spiRc;
 
-	appendStringInfo(sql, sql_format, nspOid);
+	/* safe up to 64-bit integers */
+	sql = palloc((strlen(sqlFormat) + 22) * sizeof(char));
+	sprintf(sql, sqlFormat, nspOid);
+	spiRc = SPI_exec(sql, 1);
+	pfree(sql);
+	SPI_freetuptable(SPI_tuptable);
 
-	spiRc = SPI_exec(sql->data, 1);
 	if (spiRc != SPI_OK_SELECT)
 		/* internal error */
 		elog(ERROR, "haveModulesTable: select from pg_class failed");
@@ -1438,7 +1446,7 @@ haveModulesTable(Oid nspOid)
  *
  * IMPORTANT: return value must be pfree'd
  */
-static char *
+static char*
 getModulesSql(Oid nspOid)
 {
 	StringInfo		sql = makeStringInfo();
@@ -1452,3 +1460,4 @@ getModulesSql(Oid nspOid)
 
     return sql->data;
 }
+
