@@ -3,7 +3,7 @@
  <title>PL/R User's Guide - R Procedural Language</title>
  <bookinfo>
   <copyright>
-   <year>2003</year>
+   <year>2003-2006</year>
    <holder>Joseph E Conway</holder>
   </copyright>
  </bookinfo>
@@ -67,14 +67,6 @@
    </programlisting>
   </para>
 
-  <note>
-   <para>
-   PL/R should build cleanly with PostgreSQL 7.3.x, 7.4.x, and 8.0.x. and
-   R 1.6.2 and newer. The current release passed its regression test with
-   R 2.0.1 under Fedora Core 2.
-   </para>
-  </note>
-
   <para>
    You can use <literal>plr.sql</literal> (which is created in
    <literal>contrib/plr</literal>) to create the language and support
@@ -114,16 +106,24 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
     when it was configured, in order for the libR shared object library to be
     available.
    </para>
+  </tip>
+
+  <tip>
    <para>
     Additionally, libR must be findable by your runtime linker.
     On Linux, this involves adding an entry in /etc/ld.so.conf for the
     location of libR (typically $R_HOME/bin), and then running ldconfig.
     Refer to <literal>man ldconfig</literal> or its equivalent for your system.
    </para>
+  </tip>
+
+  <tip>
    <para>
     R_HOME must be defined in the environment of the user under which
     PostgreSQL is started, <emphasis>before</emphasis> the postmaster
-    is started. Otherwise PL/R will refuse to load.
+    is started. Otherwise PL/R will refuse to load. See plr_environ(),
+    which allows examination of the environment available to the
+    PostgreSQL postmaster process.
    </para>
   </tip>
 

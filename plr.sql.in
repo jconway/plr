@@ -15,6 +15,7 @@ CREATE OR REPLACE FUNCTION install_rcmd (text)
 RETURNS text
 AS 'MODULE_PATHNAME','install_rcmd'
 LANGUAGE 'C' WITH (isstrict);
+REVOKE EXECUTE ON FUNCTION install_rcmd (text) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION plr_singleton_array (float8)
 RETURNS float8[]

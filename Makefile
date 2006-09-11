@@ -8,10 +8,6 @@ ifeq ($(PORTNAME), darwin)
 DYSUFFIX = dylib
 endif
 
-subdir = contrib/plr
-top_builddir = ../..
-include $(top_builddir)/src/Makefile.global
-
 # we can only build PL/R if libR is available
 # Since there is no official way to determine this,
 # we see if there is a file that is named like a shared library.
@@ -38,22 +34,20 @@ SHLIB_LINK	+= -L$(r_libdir1x) -L$(r_libdir2x) -lR
 DATA_built	:= plr.sql 
 DOCS		:= README.plr
 REGRESS		:= plr
-EXTRA_CLEAN	:= doc/HTML.index expected/plr.out
+EXTRA_CLEAN	:= doc/HTML.index
 
+ifdef USE_PGXS
+PGXS := $(shell pg_config --pgxs)
+include $(PGXS)
+else
+subdir = contrib/plr
+top_builddir = ../..
+include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
+endif
 
 override CPPFLAGS := -I$(srcdir) -I$(r_includespec) $(CPPFLAGS)
 override CPPFLAGS += -DPKGLIBDIR=\"$(pkglibdir)\" -DDLSUFFIX=\"$(DLSUFFIX)\"
-rpath :=
-
-installcheck: plrinstallcheck
-
-plrinstallcheck:
-ifeq ($(findstring 7.3,$(VERSION)),7.3)
-	cp -f $(top_builddir)/$(subdir)/expected/plr.out.7.3 $(top_builddir)/$(subdir)/expected/plr.out
-else
-	cp -f $(top_builddir)/$(subdir)/expected/plr.out.7.4 $(top_builddir)/$(subdir)/expected/plr.out
-endif
 
 else # can't build
 
