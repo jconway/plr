@@ -1387,23 +1387,49 @@ fetchArgNames(HeapTuple procTup, int nargs)
 
 /*
  * getNamespaceOidFromFunctionOid - Returns the OID of the namespace for the
- * postgresql function with the OID equal to the input argument.
+ * language handler function for the postgresql function with the OID equal
+ * to the input argument.
  */
 static Oid
 getNamespaceOidFromFunctionOid(Oid fnOid)
 {
-	HeapTuple		procTuple;
-	Form_pg_proc	procStruct;
-	Oid				nspOid;
+	HeapTuple			procTuple;
+	HeapTuple			langTuple;
+	Form_pg_proc		procStruct;
+	Form_pg_language	langStruct;
+	Oid					langOid;
+	Oid					hfnOid;
+	Oid					nspOid;
 
-	/* Lookup the pg_proc tuple by OID */
+	/* Lookup the pg_proc tuple for the called function by OID */
 	procTuple = SearchSysCache(PROCOID, ObjectIdGetDatum(fnOid), 0, 0, 0);
 
 	if (!HeapTupleIsValid(procTuple))
 		/* internal error */
 		elog(ERROR, "cache lookup failed for function %u", fnOid);
 
-	procStruct = (Form_pg_proc)GETSTRUCT(procTuple);
+	procStruct = (Form_pg_proc) GETSTRUCT(procTuple);
+	langOid = procStruct->prolang;
+	ReleaseSysCache(procTuple);
+
+	/* Lookup the pg_language tuple by OID */
+	langTuple = SearchSysCache(LANGOID, ObjectIdGetDatum(langOid), 0, 0, 0);
+	if (!HeapTupleIsValid(langTuple))
+		/* internal error */
+		elog(ERROR, "cache lookup failed for language %u", langOid);
+
+	langStruct = (Form_pg_language) GETSTRUCT(langTuple);
+	hfnOid = langStruct->lanplcallfoid;
+	ReleaseSysCache(langTuple);
+
+	/* Lookup the pg_proc tuple for the language handler by OID */
+	procTuple = SearchSysCache(PROCOID, ObjectIdGetDatum(hfnOid), 0, 0, 0);
+
+	if (!HeapTupleIsValid(procTuple))
+		/* internal error */
+		elog(ERROR, "cache lookup failed for function %u", hfnOid);
+
+	procStruct = (Form_pg_proc) GETSTRUCT(procTuple);
 	nspOid = procStruct->pronamespace;
 	ReleaseSysCache(procTuple);
 
