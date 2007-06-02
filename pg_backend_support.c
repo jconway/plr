@@ -42,6 +42,9 @@ extern char *Dynamic_library_path;
 /* compiled function hash table */
 extern HTAB *plr_HashTable;
 
+/* caller's memory context */
+extern MemoryContext plr_caller_context;
+
 /*
  * static declarations
  */

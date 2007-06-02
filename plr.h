@@ -38,7 +38,27 @@
 #include <setjmp.h>
 #include <sys/stat.h>
 
-#define ELOG_H
+#include "R.h"
+#include "Rinternals.h"
+#include "Rdefines.h"
+#include "Rdevices.h"
+#include "Rversion.h"
+
+/*
+ * The R headers define various symbols that are also defined by the
+ * Postgres headers, so undef them first to avoid conflicts.
+ */
+#ifdef ERROR
+#undef ERROR
+#endif
+
+#ifdef WARNING
+#undef WARNING
+#endif
+
+#ifdef lcons
+#undef lcons
+#endif
 
 #include "postgres.h"
 
@@ -60,28 +80,13 @@
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 
-#include "R.h"
-#include "Rinternals.h"
-#include "Rdefines.h"
-#include "Rdevices.h"
-#include "Rversion.h"
-
-#ifdef ERROR
-#undef ERROR
-#endif
-
-#ifdef WARNING
-#undef WARNING
-#endif
-
-#undef ELOG_H
-#include "utils/elog.h"
-
 /* working with postgres 7.3 compatible sources */
 #if (CATALOG_VERSION_NO <= 200510211)
-#error "This version of PL/R only builds with PostgreSQL 8.2"
-#else
+#error "This version of PL/R only builds with PostgreSQL 8.2 or later"
+#elif (CATALOG_VERSION_NO <= 200611241)
 #define PG_VERSION_82_COMPAT
+#else
+#define PG_VERSION_83_COMPAT
 #endif
 
 #ifdef DEBUGPROTECT
@@ -182,9 +187,13 @@ extern void R_RunExitFinalizers(void);
 #else /* R_VERSION >= 1.8.0 */
 
 #include "R_ext/Parse.h"
-#define R_PARSEVECTOR(a_, b_, c_)		R_ParseVector(a_, b_, (ParseStatus *) c_)
 
-#endif /* R_VERSION */
+#if (R_VERSION >= 132352) /* R_VERSION >= 2.5.0 */
+#define R_PARSEVECTOR(a_, b_, c_)		R_ParseVector(a_, b_, (ParseStatus *) c_, R_NilValue)
+#else /* R_VERSION < 2.5.0 */
+#define R_PARSEVECTOR(a_, b_, c_)		R_ParseVector(a_, b_, (ParseStatus *) c_)
+#endif /* R_VERSION >= 2.5.0 */
+#endif /* R_VERSION >= 1.8.0 */
 
 /* convert C string to text pointer */
 #define PG_TEXT_GET_STR(textp_) \
@@ -238,7 +247,7 @@ extern void R_RunExitFinalizers(void);
 
 #define INIT_AUX_FMGR_ATTS \
 	do { \
-		finfo->fn_mcxt = QueryContext; \
+		finfo->fn_mcxt = plr_caller_context; \
 		finfo->fn_expr = (Node *) NULL; \
 	} while (0)
 
@@ -380,7 +389,7 @@ typedef struct plr_function
 {
 	char			   *proname;
 	TransactionId		fn_xmin;
-	CommandId			fn_cmin;
+	ItemPointerData		fn_tid;
 	plr_func_hashkey   *fn_hashkey; /* back-link to hashtable key */
 	bool				lanpltrusted;
 	Oid					result_typid;
