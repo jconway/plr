@@ -729,16 +729,9 @@ compile_plr_function(FunctionCallInfo fcinfo)
 
 	if (function)
 	{
-		bool	function_valid;
-
 		/* We have a compiled function, but is it still valid? */
-		if (function->fn_xmin == HeapTupleHeaderGetXmin(procTup->t_data) &&
-			ItemPointerEquals(&function->fn_tid, &procTup->t_self))
-			function_valid = true;
-		else
-			function_valid = false;
-
-		if (!function_valid)
+		if (!(function->fn_xmin == HeapTupleHeaderGetXmin(procTup->t_data) &&
+			  function->fn_cmin == HeapTupleHeaderGetCmin(procTup->t_data)))
 		{
 			/*
 			 * Nope, drop the hashtable entry.  XXX someday, free all the
@@ -843,7 +836,7 @@ do_compile(FunctionCallInfo fcinfo,
 
 	function->proname = pstrdup(proname);
 	function->fn_xmin = HeapTupleHeaderGetXmin(procTup->t_data);
-	function->fn_tid = procTup->t_self;
+	function->fn_cmin = HeapTupleHeaderGetCmin(procTup->t_data);
 
 	/* Lookup the pg_language tuple by Oid*/
 	langTup = SearchSysCache(LANGOID,

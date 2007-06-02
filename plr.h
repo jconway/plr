@@ -82,11 +82,11 @@
 
 /* working with postgres 7.3 compatible sources */
 #if (CATALOG_VERSION_NO <= 200510211)
-#error "This version of PL/R only builds with PostgreSQL 8.2 or later"
+#error "This version of PL/R only builds with PostgreSQL 8.2"
 #elif (CATALOG_VERSION_NO <= 200611241)
 #define PG_VERSION_82_COMPAT
 #else
-#define PG_VERSION_83_COMPAT
+#error "This version of PL/R only builds with PostgreSQL 8.2"
 #endif
 
 #ifdef DEBUGPROTECT
@@ -389,7 +389,7 @@ typedef struct plr_function
 {
 	char			   *proname;
 	TransactionId		fn_xmin;
-	ItemPointerData		fn_tid;
+	CommandId			fn_cmin;
 	plr_func_hashkey   *fn_hashkey; /* back-link to hashtable key */
 	bool				lanpltrusted;
 	Oid					result_typid;
