@@ -43,6 +43,7 @@
  * Global data
  */
 MemoryContext plr_SPI_context;
+MemoryContext plr_caller_context;
 HTAB *plr_HashTable = (HTAB *) NULL;
 char *last_R_error_msg = NULL;
 
@@ -111,6 +112,7 @@ static Oid plr_nspOid = InvalidOid;
 /*
  * static declarations
  */
+static void plr_atexit(void);
 static void plr_load_builtins(Oid funcid);
 static void plr_init_all(Oid funcid);
 static Datum plr_trigger_handler(PG_FUNCTION_ARGS);
@@ -146,6 +148,8 @@ plr_call_handler(PG_FUNCTION_ARGS)
 	MemoryContext	origcontext = CurrentMemoryContext;
 	/* save caller's SPI context */
 	MemoryContext	plr_SPI_context_save = plr_SPI_context;
+	/* save caller's context */
+	plr_caller_context = origcontext;
 
 	/* Connect to SPI manager */
 	if (SPI_connect() != SPI_OK_CONNECT)
@@ -264,6 +268,21 @@ PLR_CLEANUP
 	}
 }
 
+static void
+plr_atexit(void)
+{
+	/* only react during plr startup */
+	if (plr_pm_init_done)
+		return;
+
+	ereport(ERROR,
+			(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+			 errmsg("the R interpreter did not initialize"),
+			 errhint("R_HOME must be correct in the environment " \
+					 "of the user that starts the postmaster process.")));
+}
+
+
 /*
  * plr_init() - Initialize all that's safe to do in the postmaster
  *
@@ -290,7 +309,23 @@ plr_init(void)
 						 "of the user that starts the postmaster process.")));
 
 	rargc = sizeof(rargv)/sizeof(rargv[0]);
-	Rf_initEmbeddedR(rargc, rargv);
+
+	/*
+	 * register an exit callback to handle the case where R does not initialize
+	 * and just exits with R_suicide()
+	 */
+	atexit(plr_atexit);
+
+	/*
+	 * When initialization fails, R currently exits. Check the return
+	 * value anyway in case this ever gets fixed
+	 */
+	if (!Rf_initEmbeddedR(rargc, rargv))
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("the R interpreter did not initialize"),
+				 errhint("R_HOME must be correct in the environment " \
+						 "of the user that starts the postmaster process.")));
 
 	/* arrange for automatic cleanup at proc_exit */
 	on_proc_exit(plr_cleanup, 0);
@@ -1249,7 +1284,12 @@ call_r_func(SEXP fun, SEXP rargs)
 			obj = CDR(obj);
 		}
 		UNPROTECT(1);
-		PROTECT(call = lcons(fun, args));
+        /*
+         * NB: the headers of both R and Postgres define a function
+         * called lcons, so use the full name to be precise about what
+         * function we're calling.
+         */
+		PROTECT(call = Rf_lcons(fun, args));
 	}
 	else
 	{
@@ -1316,7 +1356,7 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull)
 		else
 		{
 			/* better be a pg array arg, convert to a multi-row vector */
-			Datum		dvalue = arg[i];
+			Datum		dvalue = (Datum) PG_DETOAST_DATUM(arg[i]);
 			FmgrInfo	out_func = function->arg_elem_out_func[i];
 			int			typlen = function->arg_elem_typlen[i];
 			bool		typbyval = function->arg_elem_typbyval[i];
