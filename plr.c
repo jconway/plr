@@ -1238,15 +1238,21 @@ plr_parse_func_body(const char *body)
 {
 	SEXP	rbody;
 	SEXP	fun;
+    SEXP	tmp;
 	int		status;
 
 	PROTECT(rbody = NEW_CHARACTER(1));
 	SET_STRING_ELT(rbody, 0, COPY_TO_USER_STRING(body));
 
-	PROTECT(fun = VECTOR_ELT(R_PARSEVECTOR(rbody, -1, &status), 0));
+	tmp = PROTECT(R_PARSEVECTOR(rbody, -1, &status));
+	if (tmp != R_NilValue)
+		PROTECT(fun = VECTOR_ELT(tmp, 0));
+	else
+		PROTECT(fun = R_NilValue);
+
 	if (status != PARSE_OK)
 	{
-	    UNPROTECT(2);
+	    UNPROTECT(3);
 		if (last_R_error_msg)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_EXCEPTION),
@@ -1260,7 +1266,7 @@ plr_parse_func_body(const char *body)
 							   "in \"%s\".", body)));
 	}
 
-	UNPROTECT(2);
+	UNPROTECT(3);
 	return(fun);
 }
 
