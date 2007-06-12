@@ -91,17 +91,12 @@
 
 #ifdef DEBUGPROTECT
 #undef PROTECT
-#define PROTECT(s) \
-	do { \
-		elog(NOTICE, "\tPROTECT\t1\t%s\t%d", __FILE__, __LINE__); \
-		protect(s); \
-	} while (0)
+extern SEXP pg_protect(SEXP s, char *fn, int ln);
+#define PROTECT(s)		pg_protect(s, __FILE__, __LINE__)
+
 #undef UNPROTECT
-#define UNPROTECT(n) \
-	do { \
-		elog(NOTICE, "\tUNPROTECT\t%d\t%s\t%d", n, __FILE__, __LINE__); \
-		unprotect(n); \
-	} while (0)
+extern void pg_unprotect(int n, char *fn, int ln);
+#define UNPROTECT(n)	pg_unprotect(n, __FILE__, __LINE__)
 #endif /* DEBUGPROTECT */
 
 #define xpfree(var_) \
