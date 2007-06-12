@@ -1531,3 +1531,19 @@ getModulesSql(Oid nspOid)
 
     return sql->data;
 }
+
+#ifdef DEBUGPROTECT
+SEXP
+pg_protect(SEXP s, char *fn, int ln)
+{
+	elog(NOTICE, "\tPROTECT\t1\t%s\t%d", fn, ln);
+	return protect(s);
+}
+
+void
+pg_unprotect(int n, char *fn, int ln)
+{
+	elog(NOTICE, "\tUNPROTECT\t%d\t%s\t%d", n, fn, ln);
+	unprotect(n);
+}
+#endif /* DEBUGPROTECT */

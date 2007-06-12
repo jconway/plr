@@ -142,6 +142,7 @@ plr_SPI_exec(SEXP rsql)
 
 	PROTECT(rsql =  AS_CHARACTER(rsql));
 	sql = CHAR(STRING_ELT(rsql, 0));
+	UNPROTECT(1);
 	if (sql == NULL)
 		error("%s", "cannot exec empty query");
 
@@ -285,6 +286,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 
 	PROTECT(rsql =  AS_CHARACTER(rsql));
 	sql = CHAR(STRING_ELT(rsql, 0));
+	UNPROTECT(1);
 	if (sql == NULL)
 		error("%s", "cannot prepare empty query");
 
@@ -341,6 +343,8 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	else
 		typeids = NULL;
 
+	UNPROTECT(1);
+
 	/* switch to SPI memory context */
 	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
 
@@ -355,8 +359,6 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	}
 	PLR_PG_CATCH();
 	PLR_PG_END_TRY();
-	
-	UNPROTECT(2);
 
 	if (pplan == NULL)
 	{
