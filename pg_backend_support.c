@@ -42,7 +42,9 @@
 #endif
 
 /* GUC variable */
-extern char *Dynamic_library_path;
+extern DLLIMPORT char *Dynamic_library_path;
+/* Postgres global */
+extern DLLIMPORT char pkglib_path[];
 
 /* compiled function hash table */
 extern HTAB *plr_HashTable;
