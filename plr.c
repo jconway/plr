@@ -814,6 +814,7 @@ do_compile(FunctionCallInfo fcinfo,
 	StringInfo				proc_internal_args = makeStringInfo();
 	char				   *proc_source;
 	MemoryContext			oldcontext;
+	char				   *p;
 
 	/* grab the function name */
 	proname = NameStr(procStruct->proname);
@@ -1203,6 +1204,26 @@ do_compile(FunctionCallInfo fcinfo,
 	if (isnull)
 		elog(ERROR, "null prosrc");
 	proc_source = DatumGetCString(DirectFunctionCall1(textout, prosrcdatum));
+
+	/*
+	 * replace any carriage returns with either a space or a newline,
+	 * as appropriate
+	 */
+	p = proc_source;
+	while (*p != '\0')
+	{
+		if (p[0] == '\r')
+		{
+			if (p[1] == '\n')
+				/* for crlf sequence, write over the cr with a space */
+				*p++ = ' ';
+			else
+				/* otherwise write over the cr with a nl */
+				*p++ = '\n';
+		}
+		else
+			p++;
+	}
 
 	appendStringInfo(proc_internal_def, "%s}", proc_source);
 
