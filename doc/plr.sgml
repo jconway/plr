@@ -790,6 +790,77 @@ select * from test_spi_execp('sp') as t(typeid oid, typename name);
      </varlistentry>
 
      <varlistentry>
+      <term>
+       <function>pg.spi.cursor_open</function>(
+       <type> character</type> <replaceable>cursor_name</replaceable>,
+       <type>external pointer</type> <replaceable>saved_plan</replaceable>,
+       <type>variable list</type> <replaceable>value_list</replaceable>)
+      </term>
+      <listitem>
+       <para>
+        Opens a cursor identified by cursor_name. The cursor can then be used to scroll through
+        the results of a query plan previously prepared by pg.spi.prepare. Any arguments to 
+        the plan should be specified in argvalues similar to pg.spi.execp. Only read-only cursors
+        are supported at the moment.
+        <programlisting>
+plan <- pg.spi.prepare('SELECT * FROM pg_class');
+cursor_obj <- pg.spi.cursor_open('my_cursor',plan);
+        </programlisting>
+       </para>
+       <para>
+        Returns a cursor object that be be passed to <function>pg.spi.cursor_fetch</function>
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term>
+       <function>pg.spi.cursor_fetch</function>(
+       <type>external pointer</type> <replaceable>cursor</replaceable>,
+       <type>boolean</type> <replaceable>forward</replaceable>,
+       <type>integer</type> <replaceable>rows</replaceable>)
+      </term>
+      <listitem>
+       <para>
+        Fetches rows from the cursor object previosuly returned by <function>pg.spi.cursor_open
+        </function>. If forward is TRUE then the cursor is moved forward to
+        fetch at most the number of rows required by the rows parameter.  If forward is 
+        FALSE then the cursor is moved backrwards at most the number of rows specified.
+       </para>
+       <para>
+        rows indicates the maximum number of rows that should be returned.
+       </para>
+       <para>
+        <programlisting>
+plan <- pg.spi.prepare('SELECT * FROM pg_class');
+cursor_obj <- pg.spi.cursor_open('my_cursor',plan);
+data <- pg.spi.cursor_forward(cursor_obj,TRUE,10);
+        </programlisting>
+       </para>
+       <para>
+        Returns a data frame containing the results.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term>
+       <function>pg.spi.cursor_close</function>(
+       <type>external pointer</type><replaceable>cursor</replaceable>)
+      </term>
+      <listitem>
+       <para>
+        Closes a cursor previously opened by <function>pg.spi.cursor_open</function>
+        <programlisting>
+plan <- pg.spi.prepare('SELECT * FROM pg_class');
+cursor_obj <- pg.spi.cursor_open('my_cursor',plan);
+pg.spi.cursor_close(cursor_obj);
+        </programlisting>
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
       <term><function>pg.spi.lastoid</function>()</term>
       <listitem>
        <para>

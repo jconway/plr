@@ -1,8 +1,20 @@
 # location of R library
+
+ifdef R_HOME
 r_libdir1x = ${R_HOME}/bin
 r_libdir2x = ${R_HOME}/lib
 # location of R includes
 r_includespec = ${R_HOME}/include
+else
+R_HOME := $(shell pkg-config --variable=rhome libR)
+r_libdir1x := $(shell pkg-config --variable=rlibdir libR)
+r_libdir2x := $(shell pkg-config --variable=rlibdir libR)
+r_includespec := $(shell pkg-config --variable=rincludedir libR)
+endif
+
+rhomedef := $(shell pkg-config --variable=rhome libR)
+
+ifneq (,${R_HOME})
 
 MODULE_big	:= plr
 PG_CPPFLAGS	+= -I$(r_includespec)
@@ -55,6 +67,7 @@ ifneq (,$(findstring yes, $(shared_libr)$(allow_nonpic_in_shlib)))
 
 override CPPFLAGS := -I$(srcdir) -I$(r_includespec) $(CPPFLAGS)
 override CPPFLAGS += -DPKGLIBDIR=\"$(pkglibdir)\" -DDLSUFFIX=\"$(DLSUFFIX)\"
+override CPPFLAGS += -DR_HOME_DEFAULT=\"$(rhomedef)\"
 
 else # can't build
 
@@ -65,4 +78,14 @@ all:
 	 echo "*** the documentation for details."; \
 	 echo ""
 
-endif # can't build
+endif # can't build - cannot find libR
+
+else  # can't build - no R_HOME
+
+all:
+	@echo ""; \
+	 echo "*** Cannot build PL/R because R_HOME cannot be found." ; \
+	 echo "*** Refer to the documentation for details."; \
+	 echo ""
+
+endif

@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2006 by Joseph E. Conway
+ * Copyright (c) 2003-2007 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -76,6 +76,8 @@ static Oid plr_nspOid = InvalidOid;
 #define THROWERROR_CMD \
 			"pg.throwerror <-function(msg) " \
 			"{stop(msg, call. = FALSE)}"
+#define OPTIONS_THROWWARN_CMD \
+			"options(warning.expression = expression(pg.thrownotice(last.warning)))"
 #define QUOTE_LITERAL_CMD \
 			"pg.quoteliteral <-function(sql) " \
 			"{.Call(\"plr_quote_literal\", sql)}"
@@ -90,6 +92,18 @@ static Oid plr_nspOid = InvalidOid;
 #define SPI_EXECP_CMD \
 			"pg.spi.execp <-function(sql, argvalues = NA) " \
 			"{.Call(\"plr_SPI_execp\", sql, argvalues)}"
+#define SPI_CURSOR_OPEN_CMD \
+			"pg.spi.cursor_open<-function(cursor_name,plan,argvalues=NA) " \
+			"{.Call(\"plr_SPI_cursor_open\",cursor_name,plan,argvalues)}"
+#define SPI_CURSOR_FETCH_CMD \
+			"pg.spi.cursor_fetch<-function(cursor,forward,rows) " \
+			"{.Call(\"plr_SPI_cursor_fetch\",cursor,forward,rows)}"
+#define SPI_CURSOR_MOVE_CMD \
+			"pg.spi.cursor_move<-function(cursor,forward,rows) " \
+			"{.Call(\"plr_SPI_cursor_move\",cursor,forward,rows)}"
+#define SPI_CURSOR_CLOSE_CMD \
+			"pg.spi.cursor_close<-function(cursor) " \
+			"{.Call(\"plr_SPI_cursor_close\",cursor)}"
 #define SPI_LASTOID_CMD \
 			"pg.spi.lastoid <-function() " \
 			"{.Call(\"plr_SPI_lastoid\")}"
@@ -300,11 +314,17 @@ plr_init(void)
 	/* refuse to start if R_HOME is not defined */
 	r_home = getenv("R_HOME");
 	if (r_home == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("environment variable R_HOME not defined"),
-				 errhint("R_HOME must be defined in the environment " \
-						 "of the user that starts the postmaster process.")));
+	{
+		/* see if this is a compiled in default R_HOME */
+		if (strlen(R_HOME_DEFAULT))
+			setenv("R_HOME", R_HOME_DEFAULT, 0);
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("environment variable R_HOME not defined"),
+					 errhint("R_HOME must be defined in the environment " \
+							 "of the user that starts the postmaster process.")));
+	}
 
 	rargc = sizeof(rargv)/sizeof(rargv[0]);
 
@@ -328,6 +348,14 @@ plr_init(void)
 	/* arrange for automatic cleanup at proc_exit */
 	on_proc_exit(plr_cleanup, 0);
 
+	/*
+	 * Force non-interactive mode since R may not do so.
+	 * See comment in Rembedded.c just after R_Interactive = TRUE:
+	 * "Rf_initialize_R set this based on isatty"
+	 * If Postgres still has the tty attached, R_Interactive remains TRUE
+	 */
+	R_Interactive = false;
+
 	plr_pm_init_done = true;
 }
 
@@ -349,6 +377,7 @@ plr_load_builtins(Oid funcid)
 		OPTIONS_THROWRERROR_CMD,
 		THROWNOTICE_CMD,
 		THROWERROR_CMD,
+		OPTIONS_THROWWARN_CMD,
 
 		/* install the commands for SPI support in the interpreter */
 		QUOTE_LITERAL_CMD,
@@ -356,6 +385,10 @@ plr_load_builtins(Oid funcid)
 		SPI_EXEC_CMD,
 		SPI_PREPARE_CMD,
 		SPI_EXECP_CMD,
+		SPI_CURSOR_OPEN_CMD,
+		SPI_CURSOR_FETCH_CMD,
+		SPI_CURSOR_MOVE_CMD,
+		SPI_CURSOR_CLOSE_CMD,
 		SPI_LASTOID_CMD,
 		SPI_FACTOR_CMD,
 
@@ -1218,13 +1251,14 @@ do_compile(FunctionCallInfo fcinfo,
 			p++;
 	}
 
-	appendStringInfo(proc_internal_def, "%s}", proc_source);
-
 	/* parse or find the R function */
 	if(proc_source && proc_source[0])
-		function->fun = plr_parse_func_body(proc_internal_def->data);
+		appendStringInfo(proc_internal_def, "%s}", proc_source);
 	else
-		function->fun = Rf_findFun(Rf_install(proname), R_GlobalEnv);
+		appendStringInfo(proc_internal_def, "%s(%s)}",
+						 function->proname,
+						 proc_internal_args->data);
+	function->fun = plr_parse_func_body(proc_internal_def->data);
 
 	R_PreserveObject(function->fun);
 

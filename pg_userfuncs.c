@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2006 by Joseph E. Conway
+ * Copyright (c) 2003-2007 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -362,3 +362,34 @@ plr_environ(PG_FUNCTION_ARGS)
 	return (Datum) 0;
 }
 
+/*-----------------------------------------------------------------------------
+ * plr_set_rhome :
+ *		utility function to set the R_HOME environment variable under
+ *		which the postmaster is running.
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(plr_set_rhome);
+Datum
+plr_set_rhome(PG_FUNCTION_ARGS)
+{
+	char		   *rhome = PG_TEXT_GET_STR(PG_GETARG_TEXT_P(0));
+
+	setenv("R_HOME", rhome, 1);
+
+	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
+}
+
+/*-----------------------------------------------------------------------------
+ * plr_unset_rhome :
+ *		utility function to unset the R_HOME environment variable under
+ *		which the postmaster is running.
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(plr_unset_rhome);
+Datum
+plr_unset_rhome(PG_FUNCTION_ARGS)
+{
+	unsetenv("R_HOME");
+
+	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
+}

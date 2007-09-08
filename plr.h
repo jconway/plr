@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2006 by Joseph E. Conway
+ * Copyright (c) 2003-2007 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -39,6 +39,11 @@
 #include <sys/stat.h>
 
 #include "R.h"
+/* R version is calculated as shown below */
+#if (R_VERSION >= 132096) /* R_VERSION >= 2.4.0 */
+#include "Rembedded.h"
+#endif
+#include "Rinterface.h"
 #include "Rinternals.h"
 #include "Rdefines.h"
 #include "Rdevices.h"
@@ -81,9 +86,9 @@
 #include "utils/syscache.h"
 
 /* working with postgres 7.3 compatible sources */
-#if (CATALOG_VERSION_NO <= 200510211)
-#error "This version of PL/R only builds with PostgreSQL 8.2"
-#elif (CATALOG_VERSION_NO <= 200611241)
+#if !defined(PG_VERSION_NUM) || PG_VERSION_NUM < 80200
+#error "This version of PL/R only builds with PostgreSQL 8.2 or later"
+#elif PG_VERSION_NUM < 80300
 #define PG_VERSION_82_COMPAT
 #else
 #error "This version of PL/R only builds with PostgreSQL 8.2"
@@ -112,12 +117,6 @@ extern void pg_unprotect(int n, char *fn, int ln);
 	do { \
 		xpfree((mystr_)->data); \
 		xpfree(mystr_); \
-	} while (0)
-
-#define resetStringInfo(mystr_) \
-	do { \
-		xpfree((mystr_)->data); \
-		initStringInfo(mystr_); \
 	} while (0)
 
 #define NEXT_STR_ELEMENT	" %s"
@@ -217,6 +216,7 @@ extern void R_RunExitFinalizers(void);
 
 #define POP_PLERRCONTEXT \
 	do { \
+		pfree(plerrcontext.arg); \
 		error_context_stack = plerrcontext.previous; \
 	} while (0)
 
@@ -449,6 +449,10 @@ extern SEXP plr_quote_ident(SEXP rawstr);
 extern SEXP plr_SPI_exec(SEXP rsql);
 extern SEXP plr_SPI_prepare(SEXP rsql, SEXP rargtypes);
 extern SEXP plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues);
+extern SEXP plr_SPI_cursor_open(SEXP cursor_name_arg,SEXP rsaved_plan, SEXP rargvalues);
+extern SEXP plr_SPI_cursor_fetch(SEXP cursor_in,SEXP forward_in, SEXP rows_in);
+extern void plr_SPI_cursor_close(SEXP cursor_in);
+extern void plr_SPI_cursor_move(SEXP cursor_in, SEXP forward_in, SEXP rows_in);
 extern SEXP plr_SPI_lastoid(void);
 extern void throw_r_error(const char **msg);
 
@@ -459,6 +463,8 @@ extern Datum plr_array_push(PG_FUNCTION_ARGS);
 extern Datum plr_array(PG_FUNCTION_ARGS);
 extern Datum plr_array_accum(PG_FUNCTION_ARGS);
 extern Datum plr_environ(PG_FUNCTION_ARGS);
+extern Datum plr_set_rhome(PG_FUNCTION_ARGS);
+extern Datum plr_unset_rhome(PG_FUNCTION_ARGS);
 
 /* Postgres backend support functions */
 extern void compute_function_hashkey(FunctionCallInfo fcinfo,
