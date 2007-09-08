@@ -33,6 +33,7 @@
 #include "plr.h"
 
 #include "miscadmin.h"
+#include "utils/memutils.h"
 
 extern char **environ;
 
@@ -357,8 +358,21 @@ Datum
 plr_set_rhome(PG_FUNCTION_ARGS)
 {
 	char		   *rhome = PG_TEXT_GET_STR(PG_GETARG_TEXT_P(0));
+	size_t			rh_len = strlen(rhome);
 
-	setenv("R_HOME", rhome, 1);
+	if (rh_len)
+	{
+		char			   *rhenv;
+		MemoryContext		oldcontext;
+
+		/* Needs to live until/unless we explicitly delete it */
+		oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+		rhenv = palloc(8 + rh_len);
+		MemoryContextSwitchTo(oldcontext);
+
+		sprintf(rhenv, "R_HOME=%s", rhome);
+		putenv(rhenv);
+	}
 
 	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
 }

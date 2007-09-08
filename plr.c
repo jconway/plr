@@ -317,9 +317,22 @@ plr_init(void)
 	r_home = getenv("R_HOME");
 	if (r_home == NULL)
 	{
-		/* see if this is a compiled in default R_HOME */
-		if (strlen(R_HOME_DEFAULT))
-			setenv("R_HOME", R_HOME_DEFAULT, 0);
+		size_t		rh_len = strlen(R_HOME_DEFAULT);
+
+		/* see if there is a compiled in default R_HOME */
+		if (rh_len)
+		{
+			char	   *rhenv;
+			MemoryContext		oldcontext;
+
+			/* Needs to live until/unless we explicitly delete it */
+			oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+			rhenv = palloc(8 + rh_len);
+			MemoryContextSwitchTo(oldcontext);
+
+			sprintf(rhenv, "R_HOME=%s", R_HOME_DEFAULT);
+			putenv(rhenv);
+		}
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
