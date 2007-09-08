@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <setjmp.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 
 #include "R.h"
