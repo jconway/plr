@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2006 by Joseph E. Conway
+ * Copyright (c) 2003-2007 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -475,7 +475,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 
 	if (nargs > 0)
 	{
-		if (!IS_LIST(rargvalues))
+		if (!Rf_isVectorList(rargvalues))
 			error("%s", "second parameter must be a list of arguments " \
 						"to the prepared plan");
 
@@ -589,7 +589,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	return result;
 }
 
-/* 
+/*
  * plr_SPI_lastoid - return the last oid. To be used after insert queries.
  */
 SEXP
@@ -602,6 +602,203 @@ plr_SPI_lastoid(void)
 	UNPROTECT(1);
 
 	return result;
+}
+
+/*
+ * Takes the prepared plan rsaved_plan and creates a cursor 
+ * for it using the values specified in ragvalues.
+ *
+ */
+SEXP
+plr_SPI_cursor_open(SEXP cursor_name_arg,SEXP rsaved_plan, SEXP rargvalues)
+{
+	saved_plan_desc	   *plan_desc = (saved_plan_desc *) R_ExternalPtrAddr(rsaved_plan);
+	void			   *saved_plan = plan_desc->saved_plan;
+	int					nargs = plan_desc->nargs;
+	Oid				   *typelems = plan_desc->typelems;
+	FmgrInfo		   *typinfuncs = plan_desc->typinfuncs;
+	int					i;
+	Datum			   *argvalues = NULL;
+	char			   *nulls = NULL;
+	bool				isnull = false;
+	SEXP				obj;
+	SEXP				result = NULL;
+	MemoryContext		oldcontext;
+	char				cursor_name[64];
+	Portal				portal=NULL;
+	PREPARE_PG_TRY;
+	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.cursor_open");
+
+	/* Divide rargvalues */
+	if (nargs > 0)
+	{
+		if (!Rf_isVectorList(rargvalues))
+			error("%s", "second parameter must be a list of arguments " \
+						"to the prepared plan");
+
+		if (length(rargvalues) != nargs)
+			error("list of arguments (%d) is not the same length " \
+				  "as that of the prepared plan (%d)",
+				  length(rargvalues), nargs);
+
+		argvalues = (Datum *) palloc(nargs * sizeof(Datum));
+		nulls = (char *) palloc(nargs * sizeof(char));
+	}
+
+	for (i = 0; i < nargs; i++)
+	{
+		PROTECT(obj = VECTOR_ELT(rargvalues, i));
+
+		argvalues[i] = get_scalar_datum(obj, typinfuncs[i], typelems[i], &isnull);
+		if (!isnull)
+			nulls[i] = ' ';
+		else
+			nulls[i] = 'n';
+
+		UNPROTECT(1);
+	}
+	strncpy(cursor_name, CHAR(STRING_ELT(cursor_name_arg,0)), 64);
+
+	/* switch to SPI memory context */
+	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+
+	/*
+	 * trap elog/ereport so we can let R finish up gracefully
+	 * and generate the error once we exit the interpreter
+	 */
+	PG_TRY();
+	{
+		/* Open the cursor */
+		portal = SPI_cursor_open(cursor_name,saved_plan, argvalues, nulls,1);
+
+	}
+	PLR_PG_CATCH();
+	PLR_PG_END_TRY();
+
+	/* back to caller's memory context */
+	MemoryContextSwitchTo(oldcontext);
+
+	if(portal==NULL) 
+		error("SPI_cursor_open() failed");
+	else 
+		result = R_MakeExternalPtr(portal, R_NilValue, R_NilValue);
+
+	POP_PLERRCONTEXT;
+	return result;
+}
+
+SEXP
+plr_SPI_cursor_fetch(SEXP cursor_in,SEXP forward_in, SEXP rows_in)
+{
+	Portal				portal=NULL;
+	int					ntuples;
+	SEXP				result = NULL;
+	MemoryContext		oldcontext;
+	int					forward;
+	int					rows;
+	PREPARE_PG_TRY;
+	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.cursor_fetch");
+
+	portal = R_ExternalPtrAddr(cursor_in);
+	if(!IS_LOGICAL(forward_in))
+	{
+		error("pg.spi.cursor_fetch arg2 must be boolean");
+		return result;
+	}
+	if(!IS_INTEGER(rows_in))
+	{
+		error("pg.spi.cursor_fetch arg3 must be an integer");
+		return result;
+	}
+	forward = LOGICAL_DATA(forward_in)[0];
+	rows  = INTEGER_DATA(rows_in)[0];
+
+	/* switch to SPI memory context */
+	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	PG_TRY();
+	{
+		/* Open the cursor */
+		SPI_cursor_fetch(portal,forward,rows);
+		
+	}
+	PLR_PG_CATCH();
+	PLR_PG_END_TRY();
+	/* back to caller's memory context */
+	MemoryContextSwitchTo(oldcontext);
+
+	/* check the result */
+	ntuples = SPI_processed;
+	if (ntuples > 0)
+	{
+		result = rpgsql_get_results(ntuples, SPI_tuptable);
+		SPI_freetuptable(SPI_tuptable);
+	}
+	else
+		result = R_NilValue;
+
+	POP_PLERRCONTEXT;
+	return result;
+}
+
+void
+plr_SPI_cursor_close(SEXP cursor_in)
+{
+	Portal				portal=NULL;
+	MemoryContext		oldcontext;
+	PREPARE_PG_TRY;
+	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.cursor_close");
+
+	portal = R_ExternalPtrAddr(cursor_in);
+
+	/* switch to SPI memory context */
+	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	PG_TRY();
+	{
+		/* Open the cursor */
+		SPI_cursor_close(portal);
+	}
+	PLR_PG_CATCH();
+	PLR_PG_END_TRY();
+	/* back to caller's memory context */
+	MemoryContextSwitchTo(oldcontext);
+}
+
+void
+plr_SPI_cursor_move(SEXP cursor_in,SEXP forward_in, SEXP rows_in)
+{
+	Portal				portal=NULL;
+	MemoryContext		oldcontext;
+	int					forward;
+	int					rows;
+	PREPARE_PG_TRY;
+	PUSH_PLERRCONTEXT(rsupport_error_callback, "pg.spi.cursor_move");
+
+	portal = R_ExternalPtrAddr(cursor_in);
+	if(!IS_LOGICAL(forward_in))
+	{
+		error("pg.spi.cursor_move arg2 must be boolean");
+		return;
+	}
+	if(!IS_INTEGER(rows_in))
+	{
+		error("pg.spi.cursor_move arg3 must be an integer");
+		return;
+	}
+	forward = LOGICAL(forward_in)[0];
+	rows  = INTEGER(rows_in)[0];
+
+	/* switch to SPI memory context */
+	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	PG_TRY();
+	{
+		/* Open the cursor */
+		SPI_cursor_move(portal, forward, rows);
+	}
+	PLR_PG_CATCH();
+	PLR_PG_END_TRY();
+
+	/* back to caller's	 memory context */
+	MemoryContextSwitchTo(oldcontext);
 }
 
 void

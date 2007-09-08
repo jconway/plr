@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2006 by Joseph E. Conway
+ * Copyright (c) 2003-2007 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>

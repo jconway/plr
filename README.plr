@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2006 by Joseph E. Conway
+ * Copyright (c) 2003-2007 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -30,7 +30,7 @@
  * 
  */
 
-See http://www.joeconway.com/plr/ for release notes
+See http://www.joeconway.com/plr/ for release notes and latest docs
 
 Notes:
     - R headers are required. Download and install R prior to building

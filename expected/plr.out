@@ -819,3 +819,52 @@ select count(*) from foo;
 (1 row)
 
 drop trigger footrig on foo;
+-- Test cursors: creating, scrolling forward, closing
+CREATE OR REPLACE FUNCTION cursor_fetch_test(integer,boolean) RETURNS SETOF integer AS 'plan<-pg.spi.prepare("SELECT * FROM generate_series(1,10)"); cursor<-pg.spi.cursor_open("curs",plan); dat<-pg.spi.cursor_fetch(cursor,arg2,arg1); pg.spi.cursor_close(cursor); return (dat);' language 'plr';
+SELECT * FROM cursor_fetch_test(1,true);
+ cursor_fetch_test 
+-------------------
+                 1
+(1 row)
+
+SELECT * FROM cursor_fetch_test(2,true);
+ cursor_fetch_test 
+-------------------
+                 1
+                 2
+(2 rows)
+
+SELECT * FROM cursor_fetch_test(20,true);
+ cursor_fetch_test 
+-------------------
+                 1
+                 2
+                 3
+                 4
+                 5
+                 6
+                 7
+                 8
+                 9
+                10
+(10 rows)
+
+--Test cursors: scrolling backwards
+CREATE OR REPLACE FUNCTION cursor_direction_test() RETURNS SETOF integer AS'plan<-pg.spi.prepare("SELECT * FROM generate_series(1,10)"); cursor<-pg.spi.cursor_open("curs",plan); dat<-pg.spi.cursor_fetch(cursor,TRUE,as.integer(3)); dat2<-pg.spi.cursor_fetch(cursor,FALSE,as.integer(3)); pg.spi.cursor_close(cursor); return (dat2);' language 'plr';
+SELECT * FROM cursor_direction_test();
+ cursor_direction_test 
+-----------------------
+                     2
+                     1
+(2 rows)
+
+--Test cursors: Passing arguments to a plan
+CREATE OR REPLACE FUNCTION cursor_fetch_test_arg(integer) RETURNS SETOF integer AS 'plan<-pg.spi.prepare("SELECT * FROM generate_series(1,$1)",c(INT4OID)); cursor<-pg.spi.cursor_open("curs",plan,list(arg1)); dat<-pg.spi.cursor_fetch(cursor,TRUE,arg1); pg.spi.cursor_close(cursor); return (dat);' language 'plr';
+SELECT * FROM cursor_fetch_test_arg(3);
+ cursor_fetch_test_arg 
+-----------------------
+                     1
+                     2
+                     3
+(3 rows)
+

@@ -358,4 +358,17 @@ delete from foo where f0 = 11;
 select count(*) from foo;
 drop trigger footrig on foo;
 
+-- Test cursors: creating, scrolling forward, closing
+CREATE OR REPLACE FUNCTION cursor_fetch_test(integer,boolean) RETURNS SETOF integer AS 'plan<-pg.spi.prepare("SELECT * FROM generate_series(1,10)"); cursor<-pg.spi.cursor_open("curs",plan); dat<-pg.spi.cursor_fetch(cursor,arg2,arg1); pg.spi.cursor_close(cursor); return (dat);' language 'plr';
+SELECT * FROM cursor_fetch_test(1,true);
+SELECT * FROM cursor_fetch_test(2,true);
+SELECT * FROM cursor_fetch_test(20,true);
+
+--Test cursors: scrolling backwards
+CREATE OR REPLACE FUNCTION cursor_direction_test() RETURNS SETOF integer AS'plan<-pg.spi.prepare("SELECT * FROM generate_series(1,10)"); cursor<-pg.spi.cursor_open("curs",plan); dat<-pg.spi.cursor_fetch(cursor,TRUE,as.integer(3)); dat2<-pg.spi.cursor_fetch(cursor,FALSE,as.integer(3)); pg.spi.cursor_close(cursor); return (dat2);' language 'plr';
+SELECT * FROM cursor_direction_test();
+
+--Test cursors: Passing arguments to a plan
+CREATE OR REPLACE FUNCTION cursor_fetch_test_arg(integer) RETURNS SETOF integer AS 'plan<-pg.spi.prepare("SELECT * FROM generate_series(1,$1)",c(INT4OID)); cursor<-pg.spi.cursor_open("curs",plan,list(arg1)); dat<-pg.spi.cursor_fetch(cursor,TRUE,arg1); pg.spi.cursor_close(cursor); return (dat);' language 'plr';
+SELECT * FROM cursor_fetch_test_arg(3);
 
