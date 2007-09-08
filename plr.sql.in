@@ -63,3 +63,21 @@ RETURNS text AS '
   }
   return("OK")
 ' language 'plr';
+
+CREATE TYPE r_version_type AS (name text, value text);
+CREATE OR REPLACE FUNCTION r_version()
+RETURNS setof r_version_type as '
+  cbind(names(version),unlist(version))
+' language 'plr';
+
+CREATE OR REPLACE FUNCTION plr_set_rhome (text)
+RETURNS text
+AS 'MODULE_PATHNAME','plr_set_rhome'
+LANGUAGE 'C' WITH (isstrict);
+REVOKE EXECUTE ON FUNCTION plr_set_rhome (text) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION plr_unset_rhome ()
+RETURNS text
+AS 'MODULE_PATHNAME','plr_unset_rhome'
+LANGUAGE 'C';
+REVOKE EXECUTE ON FUNCTION plr_unset_rhome () FROM PUBLIC;

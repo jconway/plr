@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2006 by Joseph E. Conway
+ * Copyright (c) 2003-2007 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -81,13 +81,9 @@ install_rcmd(PG_FUNCTION_ARGS)
 	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
 }
 
-
 /*-----------------------------------------------------------------------------
  * array :
  *		form a one-dimensional array given starting elements
- *		FIXME: does not handle NULL array elements
- *		       this function should be obsoleted by similar
- *		       backend functionality
  *----------------------------------------------------------------------------
  */
 PG_FUNCTION_INFO_V1(plr_array);
@@ -104,9 +100,6 @@ plr_array(PG_FUNCTION_ARGS)
 /*-----------------------------------------------------------------------------
  * array_push :
  *		push an element onto the end of a one-dimensional array
- *		FIXME: does not handle NULL array elements
- *		       this function should be obsoleted by similar
- *		       backend functionality
  *----------------------------------------------------------------------------
  */
 PG_FUNCTION_INFO_V1(plr_array_push);
@@ -119,6 +112,7 @@ plr_array_push(PG_FUNCTION_ARGS)
 			   *lb, ub;
 	ArrayType  *result;
 	int			indx;
+	bool		isNull;
 	Oid			element_type;
 	int16		typlen;
 	bool		typbyval;
@@ -146,8 +140,8 @@ plr_array_push(PG_FUNCTION_ARGS)
 
 	get_typlenbyvalalign(element_type, &typlen, &typbyval, &typalign);
 
-	result = array_set(v, 1, &indx, newelem, FALSE, -1,
-						typlen, typbyval, typalign);
+	result = array_set(v, 1, &indx, newelem, -1,
+						typlen, typbyval, typalign, &isNull);
 
 	PG_RETURN_ARRAYTYPE_P(result);
 }
@@ -157,9 +151,6 @@ plr_array_push(PG_FUNCTION_ARGS)
  *		accumulator to build an array from input values -- when used in
  *		conjunction with plr functions that accept an array, and output
  *		a statistic, this can be used to create custom aggregates.
- *		FIXME: does not handle NULL array elements
- *		       this function should be obsoleted by similar
- *		       backend functionality
  *----------------------------------------------------------------------------
  */
 PG_FUNCTION_INFO_V1(plr_array_accum);
@@ -200,7 +191,6 @@ plr_array_accum(PG_FUNCTION_ARGS)
  * numelems is the number of function arguments. With array_accum(), we are
  * always initializing the array with a single element given to us as argument
  * number 1 (i.e. the second argument).
- *
  */
 static ArrayType *
 plr_array_create(FunctionCallInfo fcinfo, int numelems, int elem_start)
@@ -340,12 +330,6 @@ plr_environ(PG_FUNCTION_ARGS)
 		pfree(var_name);
 	}
 
-	/*
-	 * no longer need the tuple descriptor reference created by
-	 * TupleDescGetAttInMetadata()
-	 */
-	ReleaseTupleDesc(tupdesc);
-
 	tuplestore_donestoring(tupstore);
 	rsinfo->setResult = tupstore;
 
@@ -362,3 +346,34 @@ plr_environ(PG_FUNCTION_ARGS)
 	return (Datum) 0;
 }
 
+/*-----------------------------------------------------------------------------
+ * plr_set_rhome :
+ *		utility function to set the R_HOME environment variable under
+ *		which the postmaster is running.
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(plr_set_rhome);
+Datum
+plr_set_rhome(PG_FUNCTION_ARGS)
+{
+	char		   *rhome = PG_TEXT_GET_STR(PG_GETARG_TEXT_P(0));
+
+	setenv("R_HOME", rhome, 1);
+
+	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
+}
+
+/*-----------------------------------------------------------------------------
+ * plr_unset_rhome :
+ *		utility function to unset the R_HOME environment variable under
+ *		which the postmaster is running.
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(plr_unset_rhome);
+Datum
+plr_unset_rhome(PG_FUNCTION_ARGS)
+{
+	unsetenv("R_HOME");
+
+	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
+}

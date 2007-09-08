@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2006 by Joseph E. Conway
+ * Copyright (c) 2003-2007 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -105,7 +105,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	 */
 	SEXP		result;
 	char	   *value;
-	ArrayType  *v = DatumGetArrayTypeP(dvalue);
+	ArrayType  *v = (ArrayType *) dvalue;
 	Oid			element_type;
 	int			i, j, k,
 				nitems,
@@ -114,9 +114,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 				nz = 1,
 				ndim,
 			   *dim;
-	int			elem_idx = 0;
-	Datum	   *elem_values;
-	bool	   *elem_nulls;
+	char	   *p;
 
 	/* short-circuit for NULL datums */
 	if (dvalue == (Datum) NULL)
@@ -125,10 +123,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	ndim = ARR_NDIM(v);
 	element_type = ARR_ELEMTYPE(v);
 	dim = ARR_DIMS(v);
-
-	deconstruct_array(v, element_type,
-					  typlen, typbyval, typalign,
-					  &elem_values, &elem_nulls, &nitems);
+	nitems = ArrayGetNItems(ndim, dim);
 
 	/* array is empty */
 	if (nitems == 0)
@@ -161,6 +156,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	PROTECT(result = get_r_vector(element_type, nitems));
 
 	/* Convert all values to their R form and build the vector */
+	p = ARR_DATA_PTR(v);
 	for (i = 0; i < nr; i++)
 	{
 		for (j = 0; j < nc; j++)
@@ -168,25 +164,22 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 			for (k = 0; k < nz; k++)
 			{
 				Datum		itemvalue;
-				bool		isnull;
 				int			idx = (k * nr * nc) + (j * nr) + i;
 
-				isnull = elem_nulls[elem_idx];
-				itemvalue = elem_values[elem_idx++];
-
-				if (!isnull)
-				{
-					value = DatumGetCString(FunctionCall3(&out_func,
+				itemvalue = fetch_att(p, typbyval, typlen);
+				value = DatumGetCString(FunctionCall3(&out_func,
 														  itemvalue,
 														  (Datum) 0,
 														  Int32GetDatum(-1)));
-				}
-				else
-					value = NULL;
+				p = att_addlength(p, typlen, PointerGetDatum(p));
+				p = (char *) att_align(p, typalign);
 
 				/*
 				 * Note that pg_get_one_r() replaces NULL values with
-				 * the NA value appropriate for the data type.
+				 * the NA value appropriate for the data type. Not presently
+				 * a concern anyway, but when Postgres arrays start allowing
+				 * NULL elements, nothing needs to change here. That's a
+				 * Good Thing.
 				 */
 				pg_get_one_r(value, element_type, &result, idx);
 			}
@@ -245,7 +238,7 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 	 * and also allocate a names vector for the column names
 	 */
 	PROTECT(result = NEW_LIST(nc_non_dropped));
-	PROTECT(names = NEW_CHARACTER(nc_non_dropped));
+    PROTECT(names = NEW_CHARACTER(nc_non_dropped));
 
 	/*
 	 * Loop by columns
@@ -321,19 +314,19 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 	}
 
 	/* attach the column names */
-	setAttrib(result, R_NamesSymbol, names);
+    setAttrib(result, R_NamesSymbol, names);
 
 	/* attach row names - basically just the row number, zero based */
 	PROTECT(row_names = allocVector(STRSXP, nr));
 	for (i=0; i<nr; i++)
 	{
-		sprintf(buf, "%d", i+1);
-		SET_STRING_ELT(row_names, i, COPY_TO_USER_STRING(buf));
+	    sprintf(buf, "%d", i+1);
+	    SET_STRING_ELT(row_names, i, COPY_TO_USER_STRING(buf));
 	}
 	setAttrib(result, R_RowNamesSymbol, row_names);
 
 	/* finally, tell R we are a "data.frame" */
-	setAttrib(result, R_ClassSymbol, mkString("data.frame"));
+    setAttrib(result, R_ClassSymbol, mkString("data.frame"));
 
 	UNPROTECT(3);
 	return result;
@@ -354,7 +347,7 @@ get_r_vector(Oid typtype, int numels)
 		case INT4OID:
 			/* 2 and 4 byte integer pgsql datatype => use R INTEGER */
 			PROTECT(result = NEW_INTEGER(numels));
-			break;
+		    break;
 		case INT8OID:
 		case FLOAT4OID:
 		case FLOAT8OID:
@@ -366,10 +359,10 @@ get_r_vector(Oid typtype, int numels)
 			 * because R INTEGER is only 4 byte
 			 */
 			PROTECT(result = NEW_NUMERIC(numels));
-			break;
+		    break;
 		case BOOLOID:
 			PROTECT(result = NEW_LOGICAL(numels));
-			break;
+		    break;
 		default:
 			/* Everything else is defaulted to string */
 			PROTECT(result = NEW_CHARACTER(numels));
@@ -395,7 +388,7 @@ pg_get_one_r(char *value, Oid typtype, SEXP *obj, int elnum)
 				INTEGER_DATA(*obj)[elnum] = atoi(value);
 			else
 				INTEGER_DATA(*obj)[elnum] = NA_INTEGER;
-			break;
+		    break;
 		case INT8OID:
 		case FLOAT4OID:
 		case FLOAT8OID:
@@ -410,13 +403,13 @@ pg_get_one_r(char *value, Oid typtype, SEXP *obj, int elnum)
 				NUMERIC_DATA(*obj)[elnum] = atof(value);
 			else
 				NUMERIC_DATA(*obj)[elnum] = NA_REAL;
-			break;
+		    break;
 		case BOOLOID:
 			if (value)
 				LOGICAL_DATA(*obj)[elnum] = ((*value == 't') ? 1 : 0);
 			else
 				LOGICAL_DATA(*obj)[elnum] = NA_LOGICAL;
-			break;
+		    break;
 		default:
 			/* Everything else is defaulted to string */
 			if (value)
@@ -625,7 +618,7 @@ get_trigger_tuple(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bo
 		for (j = 0; j < nc; j++)
 			if (values[j] != NULL)
 				pfree(values[j]);
-	}
+    }
 
 	MemoryContextSwitchTo(oldcontext);
 
@@ -783,7 +776,17 @@ get_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 	else
 	{
 		/* create an empty array */
-		return PointerGetDatum(construct_empty_array(function->result_elem));
+		ArrayType  *array;
+		int			nbytes = ARR_OVERHEAD(0);
+		Oid			result_elem = function->result_elem;
+
+		array = (ArrayType *) palloc(nbytes);
+		array->size = nbytes;
+		array->ndim = 0;
+		array->flags = 0;
+		array->elemtype = result_elem;
+
+		return PointerGetDatum(array);
 	}
 }
 
@@ -809,12 +812,6 @@ get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 	int			idx;
 	SEXP		dfcol = NULL;
 	int			j;
-	bool	   *nulls = NULL;
-	bool		have_nulls = FALSE;
-
-	if (nc < 1)
-		/* internal error */
-		elog(ERROR, "plr: bad internal representation of data.frame");
 
 	if (function->result_istuple)
 	{
@@ -855,7 +852,6 @@ get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 		{
 			nr = length(obj);
 			dvalues = (Datum *) palloc(nr * nc * sizeof(Datum));
-			nulls = (bool *) palloc(nr * nc * sizeof(bool));
 		}
 
 		for(i = 0; i < nr; i++)
@@ -864,19 +860,15 @@ get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 			idx = ((i * nc) + j);
 
 			if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
-			{
-				nulls[idx] = TRUE;
-				have_nulls = TRUE;
-			}
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("cannot return array with NULL elements")));
 			else
-			{
-				nulls[idx] = FALSE;
 				dvalues[idx] = FunctionCall3(&in_func,
 										CStringGetDatum(value),
 										(Datum) 0,
 										Int32GetDatum(-1));
-			}
-		}
+	    }
 		UNPROTECT(2);
 	}
 
@@ -885,12 +877,8 @@ get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 	lbs[0] = 1;
 	lbs[1] = 1;
 
-	if (!have_nulls)
-		array = construct_md_array(dvalues, NULL, ndims, dims, lbs,
-									result_elem, typlen, typbyval, typalign);
-	else
-		array = construct_md_array(dvalues, nulls, ndims, dims, lbs,
-									result_elem, typlen, typbyval, typalign);
+	array = construct_md_array(dvalues, ndims, dims, lbs,
+								result_elem, typlen, typbyval, typalign);
 
 	dvalue = PointerGetDatum(array);
 
@@ -920,8 +908,6 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, int col, bool *
 	int			lbs[ndims];
 	int			idx;
 	int			cntr = 0;
-	bool	   *nulls;
-	bool		have_nulls = FALSE;
 
 	if (function->result_istuple)
 	{
@@ -950,13 +936,13 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, int col, bool *
 		{
 			case 0:
 				nr = dims[i];
-				break;
+			    break;
 			case 1:
 				nc = dims[i];
-				break;
+			    break;
 			case 2:
 				nz = dims[i];
-				break;
+			    break;
 			default:
 				/* anything higher is currently unsupported */
 				ereport(ERROR,
@@ -970,7 +956,6 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, int col, bool *
 
 	nitems = nr * nc * nz;
 	dvalues = (Datum *) palloc(nitems * sizeof(Datum));
-	nulls = (bool *) palloc(nitems * sizeof(bool));
 	PROTECT(obj =  AS_CHARACTER(rval));
 
 	for (i = 0; i < nr; i++)
@@ -979,35 +964,25 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, int col, bool *
 		{
 			for (k = 0; k < nz; k++)
 			{
-				int		arridx = cntr++;
-
 				idx = (k * nr * nc) + (j * nr) + i;
 				value = CHAR(STRING_ELT(obj, idx));
 
 				if (STRING_ELT(obj, idx) == NA_STRING || value == NULL)
-				{
-					nulls[arridx] = TRUE;
-					have_nulls = TRUE;
-				}
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("cannot return array with NULL elements")));
 				else
-				{
-					nulls[arridx] = FALSE;
-					dvalues[arridx] = FunctionCall3(&in_func,
+					dvalues[cntr++] = FunctionCall3(&in_func,
 											CStringGetDatum(value),
 											(Datum) 0,
 											Int32GetDatum(-1));
-				}
 			}
 		}
 	}
 	UNPROTECT(1);
 
-	if (!have_nulls)
-		array = construct_md_array(dvalues, NULL, ndims, dims, lbs,
-									result_elem, typlen, typbyval, typalign);
-	else
-		array = construct_md_array(dvalues, nulls, ndims, dims, lbs,
-									result_elem, typlen, typbyval, typalign);
+	array = construct_md_array(dvalues, ndims, dims, lbs,
+								result_elem, typlen, typbyval, typalign);
 
 	dvalue = PointerGetDatum(array);
 
@@ -1032,8 +1007,6 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 	int			ndims = 1;
 	int			dims[ndims];
 	int			lbs[ndims];
-	bool	   *nulls;
-	bool		have_nulls = FALSE;
 	
 	if (function->result_istuple)
 	{
@@ -1053,7 +1026,6 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 	}
 	
 	dvalues = (Datum *) palloc(objlen * sizeof(Datum));
-	nulls = (bool *) palloc(objlen * sizeof(bool));
 	PROTECT(obj =  AS_CHARACTER(rval));
 
 	/* Loop is needed here as result value might be of length > 1 */
@@ -1062,30 +1034,22 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 		value = CHAR(STRING_ELT(obj, i));
 
 		if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
-		{
-			nulls[i] = TRUE;
-			have_nulls = TRUE;
-		}
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("cannot return array with NULL elements")));
 		else
-		{
-			nulls[i] = FALSE;
 			dvalues[i] = FunctionCall3(&in_func,
 									CStringGetDatum(value),
 									(Datum) 0,
 									Int32GetDatum(-1));
-		}
-	}
+    }
 	UNPROTECT(1);
 
 	dims[0] = objlen;
 	lbs[0] = 1;
 
-	if (!have_nulls)
-		array = construct_md_array(dvalues, NULL, ndims, dims, lbs,
-									result_elem, typlen, typbyval, typalign);
-	else
-		array = construct_md_array(dvalues, nulls, ndims, dims, lbs,
-									result_elem, typlen, typbyval, typalign);
+	array = construct_md_array(dvalues, ndims, dims, lbs,
+								result_elem, typlen, typbyval, typalign);
 
 	dvalue = PointerGetDatum(array);
 
@@ -1330,7 +1294,7 @@ get_matrix_tuplestore(SEXP rval,
 
 		/* now reset the context */
 		MemoryContextSwitchTo(oldcontext);
-	}
+    }
 	UNPROTECT(1);
 
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
@@ -1395,7 +1359,7 @@ get_generic_tuplestore(SEXP rval,
 
 		/* now reset the context */
 		MemoryContextSwitchTo(oldcontext);
-	}
+    }
 	UNPROTECT(1);
 
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);

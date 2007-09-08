@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003, 2004 by Joseph E. Conway
+ * Copyright (c) 2003-2007 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -41,10 +41,17 @@
 #error "PKGLIBDIR needs to be defined to compile this file."
 #endif
 
+#ifdef PGDLLIMPORT
+/* GUC variable */
+extern PGDLLIMPORT char *Dynamic_library_path;
+/* Postgres global */
+extern PGDLLIMPORT char pkglib_path[];
+#else
 /* GUC variable */
 extern DLLIMPORT char *Dynamic_library_path;
 /* Postgres global */
 extern DLLIMPORT char pkglib_path[];
+#endif /* PGDLLIMPORT */
 
 /* compiled function hash table */
 extern HTAB *plr_HashTable;
