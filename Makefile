@@ -65,7 +65,7 @@ endif
 # to work without, we have to skip it.
 ifneq (,$(findstring yes, $(shared_libr)$(allow_nonpic_in_shlib)))
 
-override CPPFLAGS := -I$(srcdir) -I$(r_includespec) $(CPPFLAGS)
+override CPPFLAGS := -I"$(srcdir)" -I"$(r_includespec)" $(CPPFLAGS)
 override CPPFLAGS += -DPKGLIBDIR=\"$(pkglibdir)\" -DDLSUFFIX=\"$(DLSUFFIX)\"
 override CPPFLAGS += -DR_HOME_DEFAULT=\"$(rhomedef)\"
 

@@ -73,7 +73,7 @@ throw_pg_notice(const char **msg)
 SEXP
 plr_quote_literal(SEXP rval)
 {
-	char	   *value;
+	const char *value;
 	text	   *value_text;
 	text	   *result_text;
 	SEXP		result;
@@ -101,7 +101,7 @@ plr_quote_literal(SEXP rval)
 SEXP
 plr_quote_ident(SEXP rval)
 {
-	char	   *value;
+	const char *value;
 	text	   *value_text;
 	text	   *result_text;
 	SEXP		result;
@@ -130,7 +130,7 @@ plr_SPI_exec(SEXP rsql)
 {
 	int				spi_rc = 0;
 	char			buf[64];
-	char		   *sql;
+	const char	   *sql;
 	int				count = 0;
 	int				ntuples;
 	SEXP			result = NULL;
@@ -261,7 +261,7 @@ rpgsql_get_results(int ntuples, SPITupleTable *tuptable)
 SEXP
 plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 {
-	char			   *sql;
+	const char		   *sql;
 	int					nargs;
 	int					i;
 	Oid				   *typeids = NULL;

@@ -62,15 +62,30 @@
 #include "utils/syscache.h"
 
 #include "R.h"
-/* R version is calculated as shown below */
+#include "Rversion.h"
+/*
+ * R version is calculated thus:
+ *   Maj * 65536 + Minor * 256 + Build * 1
+ * So:
+ * version 1.8.0 results in:
+ *   (1 * 65536) + (8 * 256) + (0 * 1) == 67584
+ * version 1.9.0 results in:
+ *   (1 * 65536) + (9 * 256) + (0 * 1) == 67840
+ */
 #if (R_VERSION >= 132096) /* R_VERSION >= 2.4.0 */
 #include "Rembedded.h"
 #endif
+#ifndef WIN32
 #include "Rinterface.h"
+#endif
 #include "Rinternals.h"
 #include "Rdefines.h"
 #include "Rdevices.h"
-#include "Rversion.h"
+
+/* starting in R-2.7.0 this defn was removed from Rdevices.h */
+#ifndef KillAllDevices
+#define KillAllDevices					Rf_KillAllDevices
+#endif
 
 #ifdef ERROR
 #undef ERROR
@@ -125,15 +140,6 @@ extern void pg_unprotect(int n, char *fn, int ln);
 
 #define NEXT_STR_ELEMENT	" %s"
 
-/*
- * R version is calculated thus:
- *   Maj * 65536 + Minor * 256 + Build * 1
- * So:
- * version 1.8.0 results in:
- *   (1 * 65536) + (8 * 256) + (0 * 1) == 67584
- * version 1.9.0 results in:
- *   (1 * 65536) + (9 * 256) + (0 * 1) == 67840
- */
 #if (R_VERSION < 67840) /* R_VERSION < 1.9.0 */
 #define SET_COLUMN_NAMES \
 	do { \
