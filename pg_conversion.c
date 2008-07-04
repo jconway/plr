@@ -722,7 +722,7 @@ get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem, bool *isnu
 {
 	Datum		dvalue;
 	SEXP		obj;
-	char	   *value;
+	const char *value;
 
 	/*
 	 * if the element type is zero, we don't have an array,
@@ -792,7 +792,7 @@ get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 {
 	Datum		dvalue;
 	SEXP		obj;
-	char	   *value;
+	const char *value;
 	Oid			result_elem;
 	FmgrInfo	in_func;
 	int			typlen;
@@ -903,7 +903,7 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, int col, bool *
 	Datum		dvalue;
 	SEXP		obj;
 	SEXP		rdims;
-	char	   *value;
+	const char *value;
 	Oid			result_elem;
 	FmgrInfo	in_func;
 	int			typlen;
@@ -1020,7 +1020,7 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 	int			objlen = length(rval);
 	Datum		dvalue;
 	SEXP		obj;
-	char	   *value;
+	const char *value;
 	Oid			result_elem;
 	FmgrInfo	in_func;
 	int			typlen;
@@ -1314,9 +1314,9 @@ get_matrix_tuplestore(SEXP rval,
 		for (j = 0; j < nc; j++)
 		{
 			if (STRING_ELT(obj, (j * nr) + i) != NA_STRING)
-				values[j] = CHAR(STRING_ELT(obj, (j * nr) + i));
+				values[j] = (char *) CHAR(STRING_ELT(obj, (j * nr) + i));
 			else
-				values[j] = NULL;
+				values[j] = (char *) NULL;
 		}
 
 		/* construct the tuple */
@@ -1380,9 +1380,9 @@ get_generic_tuplestore(SEXP rval,
 	for(i = 0; i < nr; i++)
 	{
 		if (STRING_ELT(obj, i) != NA_STRING)
-			values[0] = CHAR(STRING_ELT(obj, i));
+			values[0] = (char *) CHAR(STRING_ELT(obj, i));
 		else
-			values[0] = NULL;
+			values[0] = (char *) NULL;
 
 		/* construct the tuple */
 		tuple = BuildTupleFromCStrings(attinmeta, values);
