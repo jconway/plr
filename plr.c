@@ -305,7 +305,7 @@ plr_init(void)
 {
 	char	   *r_home;
 	int			rargc;
-	char	   *rargv[] = {"PL/R", "--silent", "--no-save"};
+	char	   *rargv[] = {"PL/R", "--silent", "--no-save", "--no-restore"};
 
 	/* refuse to init more than once */
 	if (plr_pm_init_done)
@@ -361,6 +361,7 @@ plr_init(void)
 	/* arrange for automatic cleanup at proc_exit */
 	on_proc_exit(plr_cleanup, 0);
 
+#ifndef WIN32
 	/*
 	 * Force non-interactive mode since R may not do so.
 	 * See comment in Rembedded.c just after R_Interactive = TRUE:
@@ -368,6 +369,7 @@ plr_init(void)
 	 * If Postgres still has the tty attached, R_Interactive remains TRUE
 	 */
 	R_Interactive = false;
+#endif
 
 	plr_pm_init_done = true;
 }
