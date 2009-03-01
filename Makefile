@@ -28,7 +28,10 @@ REGRESS		:= plr
 EXTRA_CLEAN	:= doc/HTML.index expected/plr.out
 
 ifdef USE_PGXS
-PGXS := $(shell pg_config --pgxs)
+ifndef PG_CONFIG
+PG_CONFIG := pg_config
+endif
+PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 else
 subdir = contrib/plr

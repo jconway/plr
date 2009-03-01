@@ -1152,20 +1152,30 @@ get_frame_tuplestore(SEXP rval,
 			if(isFactor(dfcol))
 			{
 				SEXP t;
-				for (t = ATTRIB(dfcol); t != R_NilValue; t = CDR(t))
+
+				/*
+				 * a factor is a special type of integer
+				 * but must check for NA value first
+				 */
+				if (INTEGER_ELT(dfcol, i) != NA_INTEGER)
 				{
-					if(TAG(t) == R_LevelsSymbol)
+					for (t = ATTRIB(dfcol); t != R_NilValue; t = CDR(t))
 					{
-						SEXP	obj;
-						int		idx = INTEGER(dfcol)[i] - 1;
+						if(TAG(t) == R_LevelsSymbol)
+						{
+							SEXP	obj;
+							int		idx = INTEGER(dfcol)[i] - 1;
 
-						PROTECT(obj = CAR(t));
-						values[j] = pstrdup(CHAR(STRING_ELT(obj, idx)));
-						UNPROTECT(1);
+							PROTECT(obj = CAR(t));
+							values[j] = pstrdup(CHAR(STRING_ELT(obj, idx)));
+							UNPROTECT(1);
 
-						break;
+							break;
+						}
 					}
 				}
+				else
+					values[j] = NULL;
 			}
 			else
 			{
