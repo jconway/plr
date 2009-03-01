@@ -1,5 +1,5 @@
 #!/bin/bash
 
 jade -c ${DOCBOOKSTYLE}/catalog -d ../../../doc/src/sgml/stylesheet.dsl -i output-html -t sgml $1
-
-
+openjade  -D . -c ${DOCBOOKSTYLE}/catalog -d ../../../doc/src/sgml/stylesheet.dsl -t tex -V tex-backend -i output-print -V texpdf-output -V '%paper-type%'=USletter -o plr-US.tex-pdf $1
+pdfjadetex plr-US.tex-pdf

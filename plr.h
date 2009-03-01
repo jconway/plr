@@ -58,12 +58,17 @@
 #endif
 #include "Rinternals.h"
 #include "Rdefines.h"
+#if (R_VERSION < 133120) /* R_VERSION >= 2.8.0 */
 #include "Rdevices.h"
+#endif
 
 /* starting in R-2.7.0 this defn was removed from Rdevices.h */
 #ifndef KillAllDevices
 #define KillAllDevices					Rf_KillAllDevices
 #endif
+
+/* for some reason this is not in any R header files, it is locally defined */
+#define INTEGER_ELT(x,__i__)    INTEGER(x)[__i__]
 
 /*
  * The R headers define various symbols that are also defined by the
