@@ -95,7 +95,7 @@ select reval('a <- sd(c(1,2,3)); b <- mean(c(1,2,3)); a + b');
 
 create or replace function "commandArgs"() returns text[] as '' language 'plr';
 select "commandArgs"();
-        commandArgs        
+              commandArgs               
 ----------------------------------------
  {PL/R,--silent,--no-save,--no-restore}
 (1 row)
@@ -866,5 +866,23 @@ SELECT * FROM cursor_fetch_test_arg(3);
                      1
                      2
                      3
+(3 rows)
+
+--Test bytea arguments and return values: serialize/unserialize
+create or replace function test_serialize(text)
+returns bytea as '
+ mydf <- pg.spi.exec(arg1)
+ return (mydf)
+' language 'plr';
+create or replace function restore_df(bytea)
+returns setof record as '
+ return (arg1)
+' language 'plr';
+select * from restore_df((select test_serialize('select oid, typname from pg_type where typname in (''oid'',''name'',''int4'')'))) as t(oid oid, typname name);
+ oid | typname 
+-----+---------
+  19 | name
+  23 | int4
+  26 | oid
 (3 rows)
 

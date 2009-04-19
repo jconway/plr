@@ -81,3 +81,15 @@ RETURNS text
 AS 'MODULE_PATHNAME','plr_unset_rhome'
 LANGUAGE 'C';
 REVOKE EXECUTE ON FUNCTION plr_unset_rhome () FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION plr_set_display (text)
+RETURNS text
+AS 'MODULE_PATHNAME','plr_set_display'
+LANGUAGE 'C' WITH (isstrict);
+REVOKE EXECUTE ON FUNCTION plr_set_display (text) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION plr_get_raw (bytea)
+RETURNS bytea
+AS 'MODULE_PATHNAME','plr_get_raw'
+LANGUAGE 'C' WITH (isstrict);
+

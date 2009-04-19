@@ -3,7 +3,7 @@
  <title>PL/R User's Guide - R Procedural Language</title>
  <bookinfo>
   <copyright>
-   <year>2003-2006</year>
+   <year>2003-2009</year>
    <holder>Joseph E Conway</holder>
   </copyright>
  </bookinfo>
@@ -296,12 +296,15 @@ select round(sd('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
     The argument values supplied to a PL/R function's script are
     the input arguments converted to a corresponding R form.
     See <xref linkend="plr-args-table">. Scalar PostgreSQL
-    values become single element R vectors. One-dimensional
-    PostgreSQL arrays are converted to multi-element R vectors, two-dimensional
-    PostgreSQL arrays are mapped to R matrixes, and three-dimensional
-    PostgreSQL arrays are converted to three-dimensional R arrays. Greater
-    than three-dimensional arrays are not supported. Composite-types are
-    transformed into R data.frames.
+    values become single element R vectors. One exception to
+    this are scalar bytea values. These are first converted to
+    R raw type, and then processed by the R unserialize command.
+    One-dimensional PostgreSQL arrays are converted to multi-element
+    R vectors, two-dimensional PostgreSQL arrays are mapped to R
+    matrixes, and three-dimensional PostgreSQL arrays are converted
+    to three-dimensional R arrays. Greater than three-dimensional
+    arrays are not supported. Composite-types are transformed into
+    R data.frames.
    </para>
 
    <table id="plr-args-table">
@@ -333,6 +336,11 @@ select round(sd('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
       </row>
 
       <row>
+       <entry><type>bytea</type></entry>
+       <entry><type>object</type></entry>
+      </row>
+
+      <row>
        <entry>everything else</entry>
        <entry><type>character</type></entry>
       </row>
@@ -345,6 +353,10 @@ select round(sd('{1.23,1.31,1.42,1.27}'::_float8)::numeric,8);
     Conversely, the return values are first coerced to R character, and
     therefore anything that resolves to a string that is acceptable input
     format for the function's declared return type will produce a result.
+    Again, there is an exception for scalar bytea return values. In this
+    case, the R object being returned is first processed by the R
+    serialize command, and then the binary result is directly mapped
+    into a PostgreSQL bytea datum. 
     Similar to argument conversion, there is also a mapping between the
     dimensionality of the declared PostgreSQL return type and the type of
     R object. That mapping is shown in 
@@ -578,6 +590,9 @@ SELECT row_number(), f1 from t;
      The following commands are available to access the database from
      the body of a PL/R procedure, or in support thereof:
     </para>
+
+  <sect1 id="plr-spi-rsupport-funcs-normal">
+   <title>Normal Support</title>
 
     <variablelist>
 
@@ -834,7 +849,7 @@ cursor_obj <- pg.spi.cursor_open('my_cursor',plan);
         <programlisting>
 plan <- pg.spi.prepare('SELECT * FROM pg_class');
 cursor_obj <- pg.spi.cursor_open('my_cursor',plan);
-data <- pg.spi.cursor_forward(cursor_obj,TRUE,10);
+data <- pg.spi.cursor_fetch(cursor_obj,TRUE,as.integer(10));
         </programlisting>
        </para>
        <para>
@@ -934,8 +949,73 @@ pg.spi.cursor_close(cursor_obj);
        </para>
       </listitem>
      </varlistentry>
-
     </variablelist>
+  </sect1>
+  <sect1 id="plr-spi-rsupport-funcs-compat">
+   <title>RPostgreSQL Compatibility Support</title>
+
+    <variablelist>
+     <varlistentry>
+      <listitem>
+       <para>
+        The following functions are intended to provide some level of compatibility between
+        PL/R and RPostgreSQL (PostgreSQL DBI package). This allows, for example, a function
+        to be first prototyped using an R client, and then easily moved to PL/R for
+        production use.
+       </para>
+      </listitem>
+
+      <term><function>dbDriver</function>
+           (<type>character</type> <replaceable>dvr_name</replaceable>)
+      </term>
+      <term><function>dbConnect</function>
+           (<type>DBIDriver</type> <replaceable>drv</replaceable>,
+            <type>character</type> <replaceable>user</replaceable>,
+            <type>character</type> <replaceable>password</replaceable>,
+            <type>character</type> <replaceable>host</replaceable>,
+            <type>character</type> <replaceable>dbname</replaceable>,
+            <type>character</type> <replaceable>port</replaceable>,
+            <type>character</type> <replaceable>tty</replaceable>,
+            <type>character</type> <replaceable>options</replaceable>)
+      </term>
+      <term><function>dbSendQuery</function>
+           (<type>DBIConnection</type> <replaceable>conn</replaceable>,
+            <type>character</type> <replaceable>sql</replaceable>)
+      </term>
+      <term><function>fetch</function>
+           (<type>DBIResult</type> <replaceable>rs</replaceable>,
+            <type>integer</type> <replaceable>num_rows</replaceable>)
+      </term>
+      <term><function>dbClearResult</function>
+           (<type>DBIResult</type> <replaceable>rs</replaceable>)
+      </term>
+      <term><function>dbGetQuery</function>
+           (<type>DBIConnection</type> <replaceable>conn</replaceable>,
+            <type>character</type> <replaceable>sql</replaceable>)
+      </term>
+      <term><function>dbReadTable</function>
+           (<type>DBIConnection</type> <replaceable>conn</replaceable>,
+            <type>character</type> <replaceable>name</replaceable>)
+      </term>
+      <term><function>dbDisconnect</function>
+           (<type>DBIConnection</type> <replaceable>conn</replaceable>)
+      </term>
+      <term><function>dbUnloadDriver</function>
+           (<type>DBIDriver</type> <replaceable>drv</replaceable>)
+      </term>
+
+      <listitem>
+       <para>
+        These functions nominally work like their RPostgreSQL counterparts
+        except that all queries are performed in the current database.
+        Therefore all driver and connection related parameters are
+        ignored, and dbDriver, dbConnect, dbDisconnect, and dbUnloadDriver
+        are no-ops.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+  </sect1>
  </chapter>
 
  <chapter id="plr-pgsql-support-funcs">
@@ -1098,6 +1178,30 @@ select plr_array_accum('{23,35}', 42);
         running. This may be useful to debug issues related to R specific
         environment variables. This function is installed with EXECUTE
         permission revoked from PUBLIC.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><function>plr_set_display</function>(<type>text</type> <replaceable>display</replaceable>)</term>
+      <listitem>
+       <para>
+        Sets the DISPLAY environment vaiable under which the Postmaster is currently
+        running. This may be useful if using R to plot to a virtual frame buffer.
+        This function is installed with EXECUTE permission revoked from PUBLIC.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><function>plr_get_raw</function>(<type>bytea</type> <replaceable>serialized_object</replaceable>)</term>
+      <listitem>
+       <para>
+        By default, when R objects are returned as type <type>bytea</type>, the
+        R object is serialized using an internal R function prior to sending to PostgreSQL.
+        This function unserializes the R object using another internal R function, and
+        returns the pure raw bytes to PostgreSQL. This is useful, for example, if the R
+        object being returned is a JPEG or PNG graphic for use outside of R.
        </para>
       </listitem>
      </varlistentry>
