@@ -372,3 +372,16 @@ SELECT * FROM cursor_direction_test();
 CREATE OR REPLACE FUNCTION cursor_fetch_test_arg(integer) RETURNS SETOF integer AS 'plan<-pg.spi.prepare("SELECT * FROM generate_series(1,$1)",c(INT4OID)); cursor<-pg.spi.cursor_open("curs",plan,list(arg1)); dat<-pg.spi.cursor_fetch(cursor,TRUE,arg1); pg.spi.cursor_close(cursor); return (dat);' language 'plr';
 SELECT * FROM cursor_fetch_test_arg(3);
 
+--Test bytea arguments and return values: serialize/unserialize
+create or replace function test_serialize(text)
+returns bytea as '
+ mydf <- pg.spi.exec(arg1)
+ return (mydf)
+' language 'plr';
+
+create or replace function restore_df(bytea)
+returns setof record as '
+ return (arg1)
+' language 'plr';
+
+select * from restore_df((select test_serialize('select oid, typname from pg_type where typname in (''oid'',''name'',''int4'')'))) as t(oid oid, typname name);

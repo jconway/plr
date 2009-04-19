@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2007 by Joseph E. Conway
+ * Copyright (c) 2003-2009 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -406,4 +406,92 @@ plr_unset_rhome(PG_FUNCTION_ARGS)
 	unsetenv("R_HOME");
 
 	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
+}
+
+/*-----------------------------------------------------------------------------
+ * plr_set_display :
+ *		utility function to set the DISPLAY environment variable under
+ *		which the postmaster is running.
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(plr_set_display);
+Datum
+plr_set_display(PG_FUNCTION_ARGS)
+{
+	char		   *display = PG_TEXT_GET_STR(PG_GETARG_TEXT_P(0));
+	size_t			d_len = strlen(display);
+
+	if (d_len)
+	{
+		char			   *denv;
+		MemoryContext		oldcontext;
+
+		/* Needs to live until/unless we explicitly delete it */
+		oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+		denv = palloc(9 + d_len);
+		MemoryContextSwitchTo(oldcontext);
+
+		sprintf(denv, "DISPLAY=%s", display);
+		putenv(denv);
+	}
+
+	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
+}
+
+/*-----------------------------------------------------------------------------
+ * plr_get_raw :
+ *		utility function to ...
+ *----------------------------------------------------------------------------
+ */
+extern char *last_R_error_msg;
+ 
+PG_FUNCTION_INFO_V1(plr_get_raw);
+Datum
+plr_get_raw(PG_FUNCTION_ARGS)
+{
+	SEXP	result;
+	SEXP 	s, t, obj;
+	int		status;
+	bytea  *bvalue = PG_GETARG_BYTEA_P(0);
+	int		len, rsize;
+	bytea  *bresult;
+	char   *brptr;
+
+	PROTECT(obj = NEW_RAW(VARSIZE(bvalue)));
+	memcpy((char *) RAW(obj), VARDATA(bvalue), VARSIZE(bvalue));
+
+	/*
+	 * Need to construct a call to
+	 * unserialize(rval)
+	 */
+	PROTECT(t = s = allocList(2));
+	SET_TYPEOF(s, LANGSXP);
+	SETCAR(t, install("unserialize")); t = CDR(t);
+	SETCAR(t, obj);
+
+	PROTECT(result = R_tryEval(s, R_GlobalEnv, &status));
+	if(status != 0)
+	{
+		if (last_R_error_msg)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("R interpreter expression evaluation error"),
+					 errdetail("%s", last_R_error_msg)));
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("R interpreter expression evaluation error"),
+					 errdetail("R expression evaluation error caught in \"unserialize\".")));
+	}
+
+	len = LENGTH(result);
+	rsize = VARHDRSZ + len;
+	bresult = (bytea *) palloc(rsize);
+	SET_VARSIZE(bresult, rsize);
+	brptr = VARDATA(bresult);
+	memcpy(brptr, (char *) RAW(result), rsize - VARHDRSZ);
+
+	UNPROTECT(2);
+
+	PG_RETURN_BYTEA_P(bresult);
 }

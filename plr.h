@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2007 by Joseph E. Conway
+ * Copyright (c) 2003-2009 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -58,7 +58,7 @@
 #endif
 #include "Rinternals.h"
 #include "Rdefines.h"
-#if (R_VERSION < 133120) /* R_VERSION >= 2.8.0 */
+#if (R_VERSION < 133120) /* R_VERSION < 2.8.0 */
 #include "Rdevices.h"
 #endif
 
@@ -452,7 +452,7 @@ extern SEXP pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func);
 extern SEXP pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char typalign);
 extern SEXP pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc);
 extern Datum r_get_pg(SEXP rval, plr_function *function, FunctionCallInfo fcinfo);
-extern Datum get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem, bool *isnull);
+extern Datum get_scalar_datum(SEXP rval, Oid result_typ, FmgrInfo result_in_func, bool *isnull);
 
 /* Postgres support functions installed into the R interpreter */
 extern void throw_pg_notice(const char **msg);
@@ -477,6 +477,8 @@ extern Datum plr_array_accum(PG_FUNCTION_ARGS);
 extern Datum plr_environ(PG_FUNCTION_ARGS);
 extern Datum plr_set_rhome(PG_FUNCTION_ARGS);
 extern Datum plr_unset_rhome(PG_FUNCTION_ARGS);
+extern Datum plr_set_display(PG_FUNCTION_ARGS);
+extern Datum plr_get_raw(PG_FUNCTION_ARGS);
 
 /* Postgres backend support functions */
 extern void compute_function_hashkey(FunctionCallInfo fcinfo,

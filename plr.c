@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2007 by Joseph E. Conway
+ * Copyright (c) 2003-2009 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -107,6 +107,43 @@ static Oid plr_nspOid = InvalidOid;
 #define SPI_LASTOID_CMD \
 			"pg.spi.lastoid <-function() " \
 			"{.Call(\"plr_SPI_lastoid\")}"
+#define SPI_DBDRIVER_CMD \
+			"dbDriver <-function(db_name)\n" \
+			"{return(NA)}"
+#define SPI_DBCONN_CMD \
+			"dbConnect <- function(drv,user=\"\",password=\"\",host=\"\",dbname=\"\",port=\"\",tty =\"\",options=\"\")\n" \
+			"{return(NA)}"
+#define SPI_DBSENDQUERY_CMD \
+			"dbSendQuery <- function(conn, sql) {\n" \
+			"plan <- pg.spi.prepare(sql)\n" \
+			"cursor_obj <- pg.spi.cursor_open(\"plr_cursor\",plan)\n" \
+			"return(cursor_obj)\n" \
+			"}"
+#define SPI_DBFETCH_CMD \
+			"fetch <- function(rs,n) {\n" \
+			"data <- pg.spi.cursor_fetch(rs, TRUE, as.integer(n))\n" \
+			"return(data)\n" \
+			"}"
+#define SPI_DBCLEARRESULT_CMD \
+			"dbClearResult <- function(rs) {\n" \
+			"pg.spi.cursor_close(rs)\n" \
+			"}"
+#define SPI_DBGETQUERY_CMD \
+			"dbGetQuery <-function(conn, sql) {\n" \
+			"data <- pg.spi.exec(sql)\n" \
+			"return(data)\n" \
+			"}"
+#define SPI_DBREADTABLE_CMD \
+			"dbReadTable <- function(con, name, row.names = \"row_names\", check.names = TRUE) {\n" \
+			"data <- dbGetQuery(con, paste(\"SELECT * from\", name))\n" \
+			"return(data)\n" \
+			"}"
+#define SPI_DBDISCONN_CMD \
+			"dbDisconnect <- function(con)\n" \
+			"{return(NA)}"
+#define SPI_DBUNLOADDRIVER_CMD \
+			"dbUnloadDriver <-function(drv)\n" \
+			"{return(NA)}"
 #define SPI_FACTOR_CMD \
 			"pg.spi.factor <- function(arg1) {\n" \
 			"  for (col in 1:ncol(arg1)) {\n" \
@@ -405,6 +442,15 @@ plr_load_builtins(Oid funcid)
 		SPI_CURSOR_MOVE_CMD,
 		SPI_CURSOR_CLOSE_CMD,
 		SPI_LASTOID_CMD,
+		SPI_DBDRIVER_CMD,
+		SPI_DBCONN_CMD,
+		SPI_DBSENDQUERY_CMD,
+		SPI_DBFETCH_CMD,
+		SPI_DBCLEARRESULT_CMD,
+		SPI_DBGETQUERY_CMD,
+		SPI_DBREADTABLE_CMD,
+		SPI_DBDISCONN_CMD,
+		SPI_DBUNLOADDRIVER_CMD,
 		SPI_FACTOR_CMD,
 
 		/* handy predefined R functions */

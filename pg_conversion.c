@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2007 by Joseph E. Conway
+ * Copyright (c) 2003-2009 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -67,6 +67,8 @@ static Tuplestorestate *get_generic_tuplestore(SEXP rval,
 											 MemoryContext per_query_ctx,
 											 bool retset);
 
+extern char *last_R_error_msg;
+
 /*
  * given a scalar pg value, convert to a one row R vector
  */
@@ -74,20 +76,58 @@ SEXP
 pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func)
 {
 	SEXP		result;
-	char	   *value;
-
-	value = DatumGetCString(FunctionCall3(&arg_out_func,
-										  dvalue,
-							 			  (Datum) 0,
-										  Int32GetDatum(-1)));
-
-	/* get new vector of the appropriate type, length 1 */
-	PROTECT(result = get_r_vector(arg_typid, 1));
 
 	/* add our value to it */
-	pg_get_one_r(value, arg_typid, &result, 0);
+	if (arg_typid != BYTEAOID)
+	{
+		char	   *value;
 
-	UNPROTECT(1);
+		value = DatumGetCString(FunctionCall3(&arg_out_func,
+											  dvalue,
+								 			  (Datum) 0,
+											  Int32GetDatum(-1)));
+
+		/* get new vector of the appropriate type, length 1 */
+		PROTECT(result = get_r_vector(arg_typid, 1));
+		pg_get_one_r(value, arg_typid, &result, 0);
+		UNPROTECT(1);
+	}
+	else
+	{
+		SEXP 	s, t, obj;
+		int		status;
+
+		PROTECT(obj = get_r_vector(arg_typid, VARSIZE((bytea *) dvalue)));
+		memcpy((char *) RAW(obj),
+			   VARDATA((bytea *) dvalue),
+			   VARSIZE((bytea *) dvalue));
+
+		/*
+		 * Need to construct a call to
+		 * unserialize(rval)
+		 */
+		PROTECT(t = s = allocList(2));
+		SET_TYPEOF(s, LANGSXP);
+		SETCAR(t, install("unserialize")); t = CDR(t);
+		SETCAR(t, obj);
+
+		PROTECT(result = R_tryEval(s, R_GlobalEnv, &status));
+		if(status != 0)
+		{
+			if (last_R_error_msg)
+				ereport(ERROR,
+						(errcode(ERRCODE_DATA_EXCEPTION),
+						 errmsg("R interpreter expression evaluation error"),
+						 errdetail("%s", last_R_error_msg)));
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_DATA_EXCEPTION),
+						 errmsg("R interpreter expression evaluation error"),
+						 errdetail("R expression evaluation error caught in \"unserialize\".")));
+		}
+
+		UNPROTECT(2);
+	}
 
 	return result;
 }
@@ -370,6 +410,9 @@ get_r_vector(Oid typtype, int numels)
 		case BOOLOID:
 			PROTECT(result = NEW_LOGICAL(numels));
 			break;
+		case BYTEAOID:
+			PROTECT(result = NEW_RAW(numels));
+			break;
 		default:
 			/* Everything else is defaulted to string */
 			PROTECT(result = NEW_CHARACTER(numels));
@@ -449,7 +492,7 @@ r_get_pg(SEXP rval, plr_function *function, FunctionCallInfo fcinfo)
 		}
 
 		if (function->result_elem == 0)
-			result = get_scalar_datum(rval, function->result_in_func, function->result_elem, &isnull);
+			result = get_scalar_datum(rval, function->result_typid, function->result_in_func, &isnull);
 		else
 			result = get_array_datum(rval, function, 0, &isnull);
 
@@ -718,38 +761,88 @@ get_tuplestore(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bool 
 }
 
 Datum
-get_scalar_datum(SEXP rval, FmgrInfo result_in_func, Oid result_elem, bool *isnull)
+get_scalar_datum(SEXP rval, Oid result_typid, FmgrInfo result_in_func, bool *isnull)
 {
 	Datum		dvalue;
 	SEXP		obj;
 	const char *value;
 
 	/*
-	 * if the element type is zero, we don't have an array,
-	 * so coerce to string and take the first element as a scalar
+	 * Element type is zero, we don't have an array, so coerce to string
+	 * and take the first element as a scalar
+	 *
+	 * Exception: if result type is BYTEA, we want to return the whole
+	 * object in serialized form
 	 */
-	PROTECT(obj = AS_CHARACTER(rval));
-	value = CHAR(STRING_ELT(obj, 0));
-
-	if (STRING_ELT(obj, 0) == NA_STRING)
+	if (result_typid != BYTEAOID)
 	{
-		*isnull = true;
-		dvalue = (Datum) 0;
-	}
-	else if (value != NULL)
-	{
-		dvalue = FunctionCall3(&result_in_func,
-								CStringGetDatum(value),
-								ObjectIdGetDatum(result_elem),
-								Int32GetDatum(-1));
+		PROTECT(obj = AS_CHARACTER(rval));
+		if (STRING_ELT(obj, 0) == NA_STRING)
+		{
+			UNPROTECT(1);
+			*isnull = true;
+			dvalue = (Datum) 0;
+			return dvalue;
+		}
+		value = CHAR(STRING_ELT(obj, 0));
+		UNPROTECT(1);
+		
+		if (value != NULL)
+		{
+			dvalue = FunctionCall3(&result_in_func,
+									CStringGetDatum(value),
+									ObjectIdGetDatum(0),
+									Int32GetDatum(-1));
+		}
+		else
+		{
+			*isnull = true;
+			dvalue = (Datum) 0;
+		}
 	}
 	else
 	{
-		*isnull = true;
-		dvalue = (Datum) 0;
-	}
+		SEXP 	s, t;
+		int		len, rsize, status;
+		bytea  *result;
+		char   *rptr;
 
-	UNPROTECT(1);
+		/*
+		 * Need to construct a call to
+		 * serialize(rval, NULL)
+		 */
+		PROTECT(t = s = allocList(3));
+		SET_TYPEOF(s, LANGSXP);
+		SETCAR(t, install("serialize")); t = CDR(t);
+		SETCAR(t, rval); t = CDR(t);
+		SETCAR(t, R_NilValue);
+
+		PROTECT(obj = R_tryEval(s, R_GlobalEnv, &status));
+		if(status != 0)
+		{
+			if (last_R_error_msg)
+				ereport(ERROR,
+						(errcode(ERRCODE_DATA_EXCEPTION),
+						 errmsg("R interpreter expression evaluation error"),
+						 errdetail("%s", last_R_error_msg)));
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_DATA_EXCEPTION),
+						 errmsg("R interpreter expression evaluation error"),
+						 errdetail("R expression evaluation error caught in \"serialize\".")));
+		}
+		len = LENGTH(obj);
+
+		rsize = VARHDRSZ + len;
+		result = (bytea *) palloc(rsize);
+		SET_VARSIZE(result, rsize);
+		rptr = VARDATA(result);
+		memcpy(rptr, (char *) RAW(obj), rsize - VARHDRSZ);
+
+		UNPROTECT(2);
+
+		dvalue = PointerGetDatum(result);
+	}
 
 	return dvalue;
 }
@@ -1414,4 +1507,3 @@ get_generic_tuplestore(SEXP rval,
 
 	return tupstore;
 }
-

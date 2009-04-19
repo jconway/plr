@@ -5,14 +5,14 @@ r_libdir1x = ${R_HOME}/bin
 r_libdir2x = ${R_HOME}/lib
 # location of R includes
 r_includespec = ${R_HOME}/include
+rhomedef = ${R_HOME}
 else
 R_HOME := $(shell pkg-config --variable=rhome libR)
 r_libdir1x := $(shell pkg-config --variable=rlibdir libR)
 r_libdir2x := $(shell pkg-config --variable=rlibdir libR)
 r_includespec := $(shell pkg-config --variable=rincludedir libR)
-endif
-
 rhomedef := $(shell pkg-config --variable=rhome libR)
+endif
 
 ifneq (,${R_HOME})
 

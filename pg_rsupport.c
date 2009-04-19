@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2007 by Joseph E. Conway
+ * Copyright (c) 2003-2009 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -455,7 +455,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	saved_plan_desc	   *plan_desc = (saved_plan_desc *) R_ExternalPtrAddr(rsaved_plan);
 	void			   *saved_plan = plan_desc->saved_plan;
 	int					nargs = plan_desc->nargs;
-	Oid				   *typelems = plan_desc->typelems;
+	Oid				   *typeids = plan_desc->typeids;
 	FmgrInfo		   *typinfuncs = plan_desc->typinfuncs;
 	int					i;
 	Datum			   *argvalues = NULL;
@@ -492,7 +492,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	{
 		PROTECT(obj = VECTOR_ELT(rargvalues, i));
 
-		argvalues[i] = get_scalar_datum(obj, typinfuncs[i], typelems[i], &isnull);
+		argvalues[i] = get_scalar_datum(obj, typeids[i], typinfuncs[i], &isnull);
 		if (!isnull)
 			nulls[i] = ' ';
 		else
@@ -615,7 +615,7 @@ plr_SPI_cursor_open(SEXP cursor_name_arg,SEXP rsaved_plan, SEXP rargvalues)
 	saved_plan_desc	   *plan_desc = (saved_plan_desc *) R_ExternalPtrAddr(rsaved_plan);
 	void			   *saved_plan = plan_desc->saved_plan;
 	int					nargs = plan_desc->nargs;
-	Oid				   *typelems = plan_desc->typelems;
+	Oid				   *typeids = plan_desc->typeids;
 	FmgrInfo		   *typinfuncs = plan_desc->typinfuncs;
 	int					i;
 	Datum			   *argvalues = NULL;
@@ -649,7 +649,7 @@ plr_SPI_cursor_open(SEXP cursor_name_arg,SEXP rsaved_plan, SEXP rargvalues)
 	{
 		PROTECT(obj = VECTOR_ELT(rargvalues, i));
 
-		argvalues[i] = get_scalar_datum(obj, typinfuncs[i], typelems[i], &isnull);
+		argvalues[i] = get_scalar_datum(obj, typeids[i], typinfuncs[i], &isnull);
 		if (!isnull)
 			nulls[i] = ' ';
 		else
@@ -819,3 +819,4 @@ rsupport_error_callback(void *arg)
 	if (arg)
 		errcontext("In R support function %s", (char *) arg);
 }
+
