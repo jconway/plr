@@ -224,6 +224,7 @@ get_lib_pathstr(Oid funcid)
 	tmp = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_probin, &isnull);
 	raw_path = DatumGetCString(DirectFunctionCall1(byteaout, tmp));
 
+#if PG_VERSION_NUM >= 80500
 	/* Recognize hex input */
 	if (raw_path[0] == '\\' && raw_path[1] == 'x')
 	{
@@ -239,6 +240,9 @@ get_lib_pathstr(Oid funcid)
 	}
 	else
 		cooked_path = expand_dynamic_library_name(raw_path);
+#else
+	cooked_path = expand_dynamic_library_name(raw_path);
+#endif
 
 	if (!cooked_path)
 		cooked_path = pstrdup(raw_path);
