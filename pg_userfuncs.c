@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2009 by Joseph E. Conway
+ * Copyright (c) 2003-2010 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -32,10 +32,9 @@
  */
 #include "plr.h"
 
-#include "miscadmin.h"
-#include "utils/memutils.h"
-
+#ifndef WIN32
 extern char **environ;
+#endif
 
 static ArrayType *plr_array_create(FunctionCallInfo fcinfo,
 								   int numelems, int elem_start);
@@ -281,10 +280,17 @@ plr_environ(PG_FUNCTION_ARGS)
 	AttInMetadata	   *attinmeta;
 	MemoryContext		per_query_ctx;
 	MemoryContext		oldcontext;
-	char			  **current_env;
 	char			   *var_name;
 	char			   *var_val;
 	char			   *values[2];
+#ifndef WIN32
+	char			  **current_env;
+#else
+	char			   *buf;
+	LPTSTR				envstr;
+    int					count = 0;
+	int					i;
+#endif
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (!rsinfo || !(rsinfo->allowedModes & SFRM_Materialize))
@@ -319,6 +325,7 @@ plr_environ(PG_FUNCTION_ARGS)
 	/* initialize our tuplestore */
 	tupstore = TUPLESTORE_BEGIN_HEAP;
 
+#ifndef WIN32
 	for (current_env = environ;
 		 current_env != NULL && *current_env != NULL;
 		 current_env++)
@@ -340,7 +347,49 @@ plr_environ(PG_FUNCTION_ARGS)
 		tuplestore_puttuple(tupstore, tuple);
 		pfree(var_name);
 	}
+#else	
+	buf = GetEnvironmentStrings();
+	envstr = buf;
 
+	while (true)
+	{
+		if (*envstr == 0)
+			break;
+		while (*envstr != 0)
+			envstr++;
+		envstr++;
+		count++;
+	}
+
+	while(*buf == '=')
+		buf++;
+	for (i = 0; i < count; i++)
+	{
+		Size	name_len;
+
+		var_val = strchr(buf, '=');
+		if (!var_val)
+			continue;
+
+		name_len = var_val - buf;
+		var_name = (char *) palloc0(name_len + 1);
+		memcpy(var_name, buf, name_len);
+
+		values[0] = var_name;
+		values[1] = var_val + 1;
+
+		tuple = BuildTupleFromCStrings(attinmeta, values);
+		tuplestore_puttuple(tupstore, tuple);
+		pfree(var_name);
+		
+		while(*buf != '\0')
+			buf++;
+		buf++;
+	}
+
+	FreeEnvironmentStrings(buf);
+#endif
+	
 	/*
 	 * no longer need the tuple descriptor reference created by
 	 * TupleDescGetAttInMetadata()

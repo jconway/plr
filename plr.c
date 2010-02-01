@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2009 by Joseph E. Conway
+ * Copyright (c) 2003-2010 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -31,10 +31,6 @@
  * plr.c - Language handler and support functions
  */
 #include "plr.h"
-#include "catalog/pg_namespace.h"
-#include "storage/ipc.h"
-#include "utils/memutils.h"
-#include "utils/typcache.h"
 
 PG_MODULE_MAGIC;
 
@@ -592,15 +588,22 @@ plr_trigger_handler(PG_FUNCTION_ARGS)
 	bool			argnull[FUNC_MAX_ARGS];
 	TriggerData	   *trigdata = (TriggerData *) fcinfo->context;
 	TupleDesc		tupdesc = trigdata->tg_relation->rd_att;
-	Datum			dvalues[trigdata->tg_trigger->tgnargs];
+	Datum		   *dvalues;
 	ArrayType	   *array;
-	int				ndims = 1;
-	int				dims[ndims];
-	int				lbs[ndims];
+#define FIXED_NUM_DIMS		1
+	int				ndims = FIXED_NUM_DIMS;
+	int				dims[FIXED_NUM_DIMS];
+	int				lbs[FIXED_NUM_DIMS];
+#undef FIXED_NUM_DIMS
 	TRIGGERTUPLEVARS;
 	ERRORCONTEXTCALLBACK;
 	int				i;
 
+	if (trigdata->tg_trigger->tgnargs > 0)
+		dvalues = palloc(trigdata->tg_trigger->tgnargs * sizeof(Datum));
+	else
+		dvalues = NULL;
+	
 	/* Find or compile the function */
 	function = compile_plr_function(fcinfo);
 

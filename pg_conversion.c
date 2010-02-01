@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2009 by Joseph E. Conway
+ * Copyright (c) 2003-2010 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -33,9 +33,6 @@
  *                   to pg types
  */
 #include "plr.h"
-#include "funcapi.h"
-#include "miscadmin.h"
-#include "catalog/catversion.h"
 
 static void pg_get_one_r(char *value, Oid arg_out_fn_oid, SEXP *obj,
 																int elnum);
@@ -896,9 +893,11 @@ get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 	ArrayType  *array;
 	int			nr = 0;
 	int			nc = length(rval);
-	int			ndims = 2;
-	int			dims[ndims];
-	int			lbs[ndims];
+#define FIXED_NUM_DIMS		2
+	int			ndims = FIXED_NUM_DIMS;
+	int			dims[FIXED_NUM_DIMS];
+	int			lbs[FIXED_NUM_DIMS];
+#undef FIXED_NUM_DIMS
 	int			idx;
 	SEXP		dfcol = NULL;
 	int			j;
@@ -1009,13 +1008,24 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, int col, bool *
 	int			nr = 1;
 	int			nc = 1;
 	int			nz = 1;
-	int			dims[ndims];
-	int			lbs[ndims];
+	int		   *dims;
+	int		   *lbs;
 	int			idx;
 	int			cntr = 0;
 	bool	   *nulls;
 	bool		have_nulls = FALSE;
 
+	if (ndims > 0)
+	{
+		dims = palloc(ndims * sizeof(int));
+		lbs = palloc(ndims * sizeof(int));
+	}
+	else
+	{
+		dims = NULL;
+		lbs = NULL;
+	}
+	
 	if (function->result_istuple)
 	{
 		result_elem = function->result_fld_elem_typid[col];
@@ -1122,9 +1132,11 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 	int			i;
 	Datum	   *dvalues = NULL;
 	ArrayType  *array;
-	int			ndims = 1;
-	int			dims[ndims];
-	int			lbs[ndims];
+#define FIXED_NUM_DIMS		1
+	int			ndims = FIXED_NUM_DIMS;
+	int			dims[FIXED_NUM_DIMS];
+	int			lbs[FIXED_NUM_DIMS];
+#undef FIXED_NUM_DIMS
 	bool	   *nulls;
 	bool		have_nulls = FALSE;
 	

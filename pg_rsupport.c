@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2009 by Joseph E. Conway
+ * Copyright (c) 2003-2010 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -31,7 +31,6 @@
  * pg_rsupport.c - Postgres support for use within plr functions
  */
 #include "plr.h"
-#include "utils/memutils.h"
 
 extern MemoryContext plr_SPI_context;
 extern char *last_R_error_msg;

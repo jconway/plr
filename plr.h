@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2009 by Joseph E. Conway
+ * Copyright (c) 2003-2010 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -33,14 +33,54 @@
 #ifndef PLR_H
 #define PLR_H
 
+#include "postgres.h"
+
+#include "fmgr.h"
+#include "funcapi.h"
+#include "miscadmin.h"
+#include "access/heapam.h"
+#include "catalog/catversion.h"
+#include "catalog/pg_language.h"
+#include "catalog/pg_namespace.h"
+#include "catalog/pg_proc.h"
+#include "catalog/pg_type.h"
+#include "commands/trigger.h"
+#include "executor/spi.h"
+#include "lib/stringinfo.h"
+#include "nodes/makefuncs.h"
+#include "optimizer/clauses.h"
+#include "parser/parse_type.h"
+#include "storage/ipc.h"
+#include "tcop/tcopprot.h"
+#include "utils/array.h"
+#include "utils/builtins.h"
+#include "utils/bytea.h"
+#include "utils/lsyscache.h"
+#include "utils/memutils.h"
+#include "utils/syscache.h"
+#include "utils/typcache.h"
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <setjmp.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 
+/*
+ * The R headers define various symbols that are also defined by the
+ * Postgres headers, so undef them first to avoid conflicts.
+ */
+#ifdef ERROR
+#undef ERROR
+#endif
+
+#ifdef WARNING
+#undef WARNING
+#endif
+
 #include "R.h"
 #include "Rversion.h"
+
 /*
  * R version is calculated thus:
  *   Maj * 65536 + Minor * 256 + Build * 1
@@ -62,18 +102,8 @@
 #include "Rdevices.h"
 #endif
 
-/* starting in R-2.7.0 this defn was removed from Rdevices.h */
-#ifndef KillAllDevices
-#define KillAllDevices					Rf_KillAllDevices
-#endif
+/* Restore the Postgres headers */
 
-/* for some reason this is not in any R header files, it is locally defined */
-#define INTEGER_ELT(x,__i__)    INTEGER(x)[__i__]
-
-/*
- * The R headers define various symbols that are also defined by the
- * Postgres headers, so undef them first to avoid conflicts.
- */
 #ifdef ERROR
 #undef ERROR
 #endif
@@ -82,29 +112,20 @@
 #undef WARNING
 #endif
 
-#ifdef lcons
-#undef lcons
+#define WARNING		19
+#define ERROR		20
+
+/* starting in R-2.7.0 this defn was removed from Rdevices.h */
+#ifndef KillAllDevices
+#define KillAllDevices					Rf_KillAllDevices
 #endif
 
-#include "postgres.h"
+/* for some reason this is not in any R header files, it is locally defined */
+#define INTEGER_ELT(x,__i__)    INTEGER(x)[__i__]
 
-#include "fmgr.h"
-#include "funcapi.h"
-#include "access/heapam.h"
-#include "catalog/catversion.h"
-#include "catalog/pg_language.h"
-#include "catalog/pg_proc.h"
-#include "catalog/pg_type.h"
-#include "commands/trigger.h"
-#include "executor/spi.h"
-#include "lib/stringinfo.h"
-#include "nodes/makefuncs.h"
-#include "parser/parse_type.h"
-#include "tcop/tcopprot.h"
-#include "utils/array.h"
-#include "utils/builtins.h"
-#include "utils/lsyscache.h"
-#include "utils/syscache.h"
+#ifndef R_HOME_DEFAULT
+#define R_HOME_DEFAULT ""
+#endif
 
 /* working with postgres 7.3 compatible sources */
 #if !defined(PG_VERSION_NUM) || PG_VERSION_NUM < 80200

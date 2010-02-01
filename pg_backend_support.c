@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2009 by Joseph E. Conway
+ * Copyright (c) 2003-2010 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -32,20 +32,12 @@
  */
 #include "plr.h"
 
-#include "miscadmin.h"
-#include "optimizer/clauses.h"
-#include "utils/memutils.h"
-
 #ifdef PGDLLIMPORT
-/* GUC variable */
-extern PGDLLIMPORT char *Dynamic_library_path;
 /* Postgres global */
-extern PGDLLIMPORT char pkglib_path[];
+extern PGDLLIMPORT char my_exec_path[];
 #else
-/* GUC variable */
-extern DLLIMPORT char *Dynamic_library_path;
 /* Postgres global */
-extern DLLIMPORT char pkglib_path[];
+extern DLLIMPORT char my_exec_path[];
 #endif /* PGDLLIMPORT */
 
 /* compiled function hash table */
@@ -231,7 +223,23 @@ get_lib_pathstr(Oid funcid)
 
 	tmp = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_probin, &isnull);
 	raw_path = DatumGetCString(DirectFunctionCall1(byteaout, tmp));
-	cooked_path = expand_dynamic_library_name(raw_path);
+
+	/* Recognize hex input */
+	if (raw_path[0] == '\\' && raw_path[1] == 'x')
+	{
+		char   *result;
+		int		bc;
+		size_t	len = strlen(raw_path);
+
+		bc = (len - 2)/2 + 1;            /* maximum possible length */
+		result = palloc0(bc);
+
+		bc = hex_decode(raw_path + 2, len - 2, result);
+		cooked_path = expand_dynamic_library_name(result);
+	}
+	else
+		cooked_path = expand_dynamic_library_name(raw_path);
+
 	if (!cooked_path)
 		cooked_path = pstrdup(raw_path);
 
@@ -350,8 +358,10 @@ substitute_libpath_macro(const char *name)
 {
 	const char *sep_ptr;
 	char	   *ret;
+	char		pkglib_path[MAXPGPATH];
 
 	AssertArg(name != NULL);
+	get_pkglib_path(my_exec_path, pkglib_path);
 
 	if (name[0] != '$')
 		return pstrdup(name);
@@ -384,6 +394,7 @@ find_in_dynamic_libpath(const char *basename)
 {
 	const char *p;
 	size_t		baselen;
+	char	   *Dynamic_library_path = GetConfigOptionByName("dynamic_library_path", NULL);
 
 	AssertArg(basename != NULL);
 	AssertArg(strchr(basename, '/') == NULL);

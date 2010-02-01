@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2009 by Joseph E. Conway
+ * Copyright (c) 2003-2010 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -47,30 +47,10 @@ Installation:
   See http://www.joeconway.com/plr/doc/plr-install.html
   for the most up-to-date instructions.
 
-  Place these files in a directory called 'plr' under 'contrib' in the
-  PostgreSQL source tree. E.g. place the tarred source file in 
-  '/path/to/pg_source/contrib' and run:
-
-    tar -xzf plr-x.y.z-alpha.tar.gz
-
-  Then run:
-
-	cd /path/to/pg_source/contrib/plr
-    make
-    make install
-    make installcheck
-
-  This is usually best done logged in as the PostgreSQL superuser
-  (defaults to postgres), except root privileges may be needed for
-  "make install".
-
-  You can use plr.sql to create the functions in your database of choice, e.g.
-
-    psql mydatabase < plr.sql
-
 Documentation:
 
-  See the following files:
+  See the following:
+     See http://www.joeconway.com/plr/doc/
      doc/plr.sgml    - PL/R documentation source
      doc/*.html      - Preprocessed html version of the documentation
 
