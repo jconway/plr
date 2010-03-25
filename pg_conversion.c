@@ -231,7 +231,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	}
 	UNPROTECT(1);
 
-	if (ndim > 1)
+	if (ndim > 0)
 	{
 		SEXP	matrix_dims;
 
@@ -248,7 +248,8 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 }
 
 /*
- * given an array of pg tuples, convert to an R data.frame
+ * Given an array of pg tuples, convert to an R list
+ * the created object is not quite actually a data.frame
  */
 SEXP
 pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
@@ -369,7 +370,7 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 	}
 	setAttrib(result, R_RowNamesSymbol, row_names);
 
-	/* finally, tell R we are a "data.frame" */
+	/* finally, tell R we are a data.frame */
 	setAttrib(result, R_ClassSymbol, mkString("data.frame"));
 
 	UNPROTECT(3);
@@ -1156,7 +1157,7 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 		typbyval = function->result_elem_typbyval;
 		typalign = function->result_elem_typalign;
 	}
-	
+
 	dvalues = (Datum *) palloc(objlen * sizeof(Datum));
 	nulls = (bool *) palloc(objlen * sizeof(bool));
 	PROTECT(obj =  AS_CHARACTER(rval));
@@ -1255,11 +1256,32 @@ get_frame_tuplestore(SEXP rval,
 	for (j = 0; j < nc; j++)
 	{
 		PROTECT(dfcol = VECTOR_ELT(rval, j));
-		if(!isFactor(dfcol))
+		if((!isFactor(dfcol)) &&
+		   ((attrs[j]->attndims == 0) ||
+			(TYPEOF(dfcol) != VECSXP)))
 		{
 			SEXP	obj;
 
 			PROTECT(obj = AS_CHARACTER(dfcol));
+			SET_VECTOR_ELT(result, j, obj);
+			UNPROTECT(1);
+		}
+		else if(attrs[j]->attndims != 0)	/* array data type */
+		{
+			SEXP	obj;
+
+			PROTECT(obj = NEW_LIST(nr));
+			for(i = 0; i < nr; i++)
+			{
+				SEXP	dfcolcell;
+				SEXP	objcell;
+
+				PROTECT(dfcolcell = VECTOR_ELT(dfcol, i));
+				PROTECT(objcell = AS_CHARACTER(dfcolcell));
+				SET_VECTOR_ELT(obj, i, objcell);
+				UNPROTECT(2);
+			}
+
 			SET_VECTOR_ELT(result, j, obj);
 			UNPROTECT(1);
 		}
@@ -1320,18 +1342,26 @@ get_frame_tuplestore(SEXP rval,
 			}
 			else
 			{
-				if (STRING_ELT(dfcol, i) != NA_STRING)
+				if ((attrs[j]->attndims != 0) || (STRING_ELT(dfcol, i) != NA_STRING))
 				{
 					if (attrs[j]->attndims == 0)
+					{
 						values[j] = pstrdup(CHAR(STRING_ELT(dfcol, i)));
-					else
+					}
+					else	/* array data type */
 					{
 						bool	isnull = false;
 						Datum	arr_datum;
-						
-						arr_datum = get_array_datum(dfcol, function, j, &isnull);
+
+						if (TYPEOF(dfcol) != VECSXP)
+							arr_datum = get_array_datum(dfcol, function, j, &isnull);
+						else
+							arr_datum = get_array_datum(VECTOR_ELT(dfcol,i), function, j, &isnull);
+
 						if (isnull)
+						{
 							values[j] = NULL;
+						}
 						else
 						{
 							FunctionCallInfoData	fake_fcinfo;
