@@ -93,11 +93,13 @@ pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func)
 	{
 		SEXP 	s, t, obj;
 		int		status;
+		Datum	dt_dvalue =  PointerGetDatum(PG_DETOAST_DATUM(dvalue));
+		int		bsize = VARSIZE((bytea *) dt_dvalue);
 
-		PROTECT(obj = get_r_vector(arg_typid, VARSIZE((bytea *) dvalue)));
+		PROTECT(obj = get_r_vector(arg_typid, bsize));
 		memcpy((char *) RAW(obj),
-			   VARDATA((bytea *) dvalue),
-			   VARSIZE((bytea *) dvalue));
+			   VARDATA((bytea *) dt_dvalue),
+			   bsize);
 
 		/*
 		 * Need to construct a call to
@@ -105,7 +107,8 @@ pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func)
 		 */
 		PROTECT(t = s = allocList(2));
 		SET_TYPEOF(s, LANGSXP);
-		SETCAR(t, install("unserialize")); t = CDR(t);
+		SETCAR(t, install("unserialize"));
+		t = CDR(t);
 		SETCAR(t, obj);
 
 		PROTECT(result = R_tryEval(s, R_GlobalEnv, &status));
