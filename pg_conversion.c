@@ -144,7 +144,6 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	 * Use the converted values to build an R vector.
 	 */
 	SEXP		result;
-	char	   *value;
 	ArrayType  *v = DatumGetArrayTypeP(dvalue);
 	Oid			element_type;
 	int			i, j, k,
@@ -157,6 +156,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	int			elem_idx = 0;
 	Datum	   *elem_values;
 	bool	   *elem_nulls;
+	bool		fast_track_type;
 
 	/* short-circuit for NULL datums */
 	if (dvalue == (Datum) NULL)
@@ -165,86 +165,155 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	ndim = ARR_NDIM(v);
 	element_type = ARR_ELEMTYPE(v);
 	dim = ARR_DIMS(v);
+	nitems = ArrayGetNItems(ARR_NDIM(v), ARR_DIMS(v));
 
-	deconstruct_array(v, element_type,
-					  typlen, typbyval, typalign,
-					  &elem_values, &elem_nulls, &nitems);
-
-	/* array is empty */
-	if (nitems == 0)
+	switch (element_type)
 	{
+		case INT4OID:
+		case FLOAT8OID:
+			fast_track_type = true;
+			break;
+		default:
+			fast_track_type = false;
+	}
+
+	/*
+	 * Special case for pass-by-value data types, if the following conditions are met:
+	 * 		designated fast_track_type
+	 * 		no NULL elements
+	 * 		1 dimensional array only
+	 * 		at least one element
+	 */
+	if (fast_track_type &&
+		 typbyval &&
+		 !ARR_HASNULL(v) &&
+		 (ndim == 1) &&
+		 (nitems > 0))
+	{
+		char	   *p = ARR_DATA_PTR(v);
+
+		/* get new vector of the appropriate type and length */
 		PROTECT(result = get_r_vector(element_type, nitems));
-		UNPROTECT(1);
 
-		return result;
-	}
+		/* keep this in sync with switch above -- fast_track_type only */
+		switch (element_type)
+		{
+			case INT4OID:
+				Assert(sizeof(int) == 4);
+				memcpy(INTEGER_DATA(result), p, nitems * sizeof(int));
+				break;
+			case FLOAT8OID:
+				Assert(sizeof(double) == 8);
+				memcpy(NUMERIC_DATA(result), p, nitems * sizeof(double));
+				break;
+			default:
+				/* Everything else is error */
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("direct array passthrough attempted for unsupported type")));
+		}
 
-	if (ndim == 1)
-		nr = nitems;
-	else if (ndim == 2)
-	{
-		nr = dim[0];
-		nc = dim[1];
-	}
-	else if (ndim == 3)
-	{
-		nr = dim[0];
-		nc = dim[1];
-		nz = dim[2];
+		if (ndim > 0)
+		{
+			SEXP	matrix_dims;
+
+			/* attach dimensions */
+			PROTECT(matrix_dims = allocVector(INTSXP, ndim));
+			for (i = 0; i < ndim; i++)
+				INTEGER_DATA(matrix_dims)[i] = dim[i];
+
+			setAttrib(result, R_DimSymbol, matrix_dims);
+			UNPROTECT(1);
+		}
+
+		UNPROTECT(1);	/* result */
 	}
 	else
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("greater than 3-dimensional arrays are not yet supported")));
-
-	/* get new vector of the appropriate type and length */
-	PROTECT(result = get_r_vector(element_type, nitems));
-
-	/* Convert all values to their R form and build the vector */
-	for (i = 0; i < nr; i++)
 	{
-		for (j = 0; j < nc; j++)
+		deconstruct_array(v, element_type,
+						  typlen, typbyval, typalign,
+						  &elem_values, &elem_nulls, &nitems);
+
+		/* array is empty */
+		if (nitems == 0)
 		{
-			for (k = 0; k < nz; k++)
+			PROTECT(result = get_r_vector(element_type, nitems));
+			UNPROTECT(1);
+
+			return result;
+		}
+
+		if (ndim == 1)
+			nr = nitems;
+		else if (ndim == 2)
+		{
+			nr = dim[0];
+			nc = dim[1];
+		}
+		else if (ndim == 3)
+		{
+			nr = dim[0];
+			nc = dim[1];
+			nz = dim[2];
+		}
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("greater than 3-dimensional arrays are not yet supported")));
+
+		/* get new vector of the appropriate type and length */
+		PROTECT(result = get_r_vector(element_type, nitems));
+
+		/* Convert all values to their R form and build the vector */
+		for (i = 0; i < nr; i++)
+		{
+			for (j = 0; j < nc; j++)
 			{
-				Datum		itemvalue;
-				bool		isnull;
-				int			idx = (k * nr * nc) + (j * nr) + i;
-
-				isnull = elem_nulls[elem_idx];
-				itemvalue = elem_values[elem_idx++];
-
-				if (!isnull)
+				for (k = 0; k < nz; k++)
 				{
-					value = DatumGetCString(FunctionCall3(&out_func,
-														  itemvalue,
-														  (Datum) 0,
-														  Int32GetDatum(-1)));
-				}
-				else
-					value = NULL;
+					char	   *value;
+					Datum		itemvalue;
+					bool		isnull;
+					int			idx = (k * nr * nc) + (j * nr) + i;
 
-				/*
-				 * Note that pg_get_one_r() replaces NULL values with
-				 * the NA value appropriate for the data type.
-				 */
-				pg_get_one_r(value, element_type, &result, idx);
+					isnull = elem_nulls[elem_idx];
+					itemvalue = elem_values[elem_idx++];
+
+					if (!isnull)
+					{
+						value = DatumGetCString(FunctionCall3(&out_func,
+															  itemvalue,
+															  (Datum) 0,
+															  Int32GetDatum(-1)));
+					}
+					else
+						value = NULL;
+
+					/*
+					 * Note that pg_get_one_r() replaces NULL values with
+					 * the NA value appropriate for the data type.
+					 */
+					pg_get_one_r(value, element_type, &result, idx);
+					pfree(value);
+				}
 			}
 		}
-	}
-	UNPROTECT(1);
+		pfree(elem_values);
+		pfree(elem_nulls);
 
-	if (ndim > 0)
-	{
-		SEXP	matrix_dims;
+		if (ndim > 0)
+		{
+			SEXP	matrix_dims;
 
-		/* attach dimensions */
-		PROTECT(matrix_dims = allocVector(INTSXP, ndim));
-		for (i = 0; i < ndim; i++)
-			INTEGER_DATA(matrix_dims)[i] = dim[i];
+			/* attach dimensions */
+			PROTECT(matrix_dims = allocVector(INTSXP, ndim));
+			for (i = 0; i < ndim; i++)
+				INTEGER_DATA(matrix_dims)[i] = dim[i];
 
-		setAttrib(result, R_DimSymbol, matrix_dims);
-		UNPROTECT(1);
+			setAttrib(result, R_DimSymbol, matrix_dims);
+			UNPROTECT(1);
+		}
+		UNPROTECT(1);	/* result */
 	}
 
 	return result;
@@ -1143,7 +1212,9 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 #undef FIXED_NUM_DIMS
 	bool	   *nulls;
 	bool		have_nulls = FALSE;
-	
+	bool		fast_track_type;
+	bool		has_na = false;
+
 	if (function->result_istuple)
 	{
 		result_elem = function->result_fld_elem_typid[col];
@@ -1161,42 +1232,115 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 		typalign = function->result_elem_typalign;
 	}
 
-	dvalues = (Datum *) palloc(objlen * sizeof(Datum));
-	nulls = (bool *) palloc(objlen * sizeof(bool));
-	PROTECT(obj =  AS_CHARACTER(rval));
-
-	/* Loop is needed here as result value might be of length > 1 */
-	for(i = 0; i < objlen; i++)
+	/*
+	 * Special case for pass-by-value data types, if the following conditions are met:
+	 * 		designated fast_track_type
+	 * 		no NULL/NA elements
+	 */
+	if (TYPEOF(rval) == INTSXP ||
+		TYPEOF(rval) == REALSXP)
 	{
-		value = CHAR(STRING_ELT(obj, i));
+		switch (TYPEOF(rval)) {
+		case INTSXP:
+			if (result_elem == INT4OID)
+				fast_track_type = true;
+			else
+				fast_track_type = false;
 
-		if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
-		{
-			nulls[i] = TRUE;
-			have_nulls = TRUE;
-		}
-		else
-		{
-			nulls[i] = FALSE;
-			dvalues[i] = FunctionCall3(&in_func,
-									CStringGetDatum(value),
-									(Datum) 0,
-									Int32GetDatum(-1));
+			for (i = 0; i < objlen; i++)
+			{
+				if (INTEGER(rval)[i] == NA_INTEGER)
+				{
+					has_na = true;
+					break;
+				}
+			}
+			break;
+		case REALSXP:
+			if (result_elem == FLOAT8OID)
+				fast_track_type = true;
+			else
+				fast_track_type = false;
+
+			for (i = 0; i < objlen; i++)
+			{
+				if (ISNAN(REAL(rval)[i]))
+				{
+					has_na = true;
+					break;
+				}
+			}
+			break;
+		default:
+			fast_track_type = false;
+			has_na = true;	/* does not really matter in this case */
 		}
 	}
-	UNPROTECT(1);
+	else
+	{
+		fast_track_type = false;
+		has_na = true;	/* does not really matter in this case */
+	}
 
-	dims[0] = objlen;
-	lbs[0] = 1;
+	if (fast_track_type &&
+		 typbyval &&
+		 !has_na)
+	{
+		dims[0] = objlen;
+		lbs[0] = 1;
 
-	if (!have_nulls)
+		if (TYPEOF(rval) == INTSXP)
+			dvalues = (Datum *) INTEGER_DATA(rval);
+		else if (TYPEOF(rval) == REALSXP)
+			dvalues = (Datum *) NUMERIC_DATA(rval);
+		else
+			elog(ERROR, "attempted to passthrough invalid R datatype to Postgresql");
+
 		array = construct_md_array(dvalues, NULL, ndims, dims, lbs,
 									result_elem, typlen, typbyval, typalign);
-	else
-		array = construct_md_array(dvalues, nulls, ndims, dims, lbs,
-									result_elem, typlen, typbyval, typalign);
 
-	dvalue = PointerGetDatum(array);
+		dvalue = PointerGetDatum(array);
+	}
+	else
+	{
+		/* original code */
+		dvalues = (Datum *) palloc(objlen * sizeof(Datum));
+		nulls = (bool *) palloc(objlen * sizeof(bool));
+		PROTECT(obj =  AS_CHARACTER(rval));
+
+		/* Loop is needed here as result value might be of length > 1 */
+		for(i = 0; i < objlen; i++)
+		{
+			value = CHAR(STRING_ELT(obj, i));
+
+			if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
+			{
+				nulls[i] = TRUE;
+				have_nulls = TRUE;
+			}
+			else
+			{
+				nulls[i] = FALSE;
+				dvalues[i] = FunctionCall3(&in_func,
+										CStringGetDatum(value),
+										(Datum) 0,
+										Int32GetDatum(-1));
+			}
+		}
+		UNPROTECT(1);
+
+		dims[0] = objlen;
+		lbs[0] = 1;
+
+		if (!have_nulls)
+			array = construct_md_array(dvalues, NULL, ndims, dims, lbs,
+										result_elem, typlen, typbyval, typalign);
+		else
+			array = construct_md_array(dvalues, nulls, ndims, dims, lbs,
+										result_elem, typlen, typbyval, typalign);
+
+		dvalue = PointerGetDatum(array);
+	}
 
 	return dvalue;
 }

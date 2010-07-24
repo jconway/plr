@@ -48,18 +48,7 @@ PG_FUNCTION_INFO_V1(reload_plr_modules);
 Datum
 reload_plr_modules(PG_FUNCTION_ARGS)
 {
-	/* Connect to SPI manager */
-	if (SPI_connect() != SPI_OK_CONNECT)
-		ereport(ERROR,
-				(errcode(ERRCODE_CONNECTION_FAILURE),
-				 errmsg("cannot connect to SPI manager")));
-
-	plr_load_modules(CurrentMemoryContext);
-
-	if (SPI_finish() != SPI_OK_FINISH)
-		ereport(ERROR,
-				(errcode(ERRCODE_CONNECTION_EXCEPTION),
-				 errmsg("SPI_finish() failed")));
+	plr_load_modules();
 
 	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
 }

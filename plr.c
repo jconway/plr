@@ -37,8 +37,9 @@ PG_MODULE_MAGIC;
 /*
  * Global data
  */
-MemoryContext plr_SPI_context;
+bool plr_spi_init_done;
 MemoryContext plr_caller_context;
+MemoryContext plr_SPI_context = NULL;
 HTAB *plr_HashTable = (HTAB *) NULL;
 char *last_R_error_msg = NULL;
 
@@ -190,20 +191,13 @@ Datum
 plr_call_handler(PG_FUNCTION_ARGS)
 {
 	Datum			retval;
-	MemoryContext	origcontext = CurrentMemoryContext;
 	/* save caller's SPI context */
 	MemoryContext	plr_SPI_context_save = plr_SPI_context;
 	/* save caller's context */
-	plr_caller_context = origcontext;
+	plr_caller_context = CurrentMemoryContext;
 
-	/* Connect to SPI manager */
-	if (SPI_connect() != SPI_OK_CONNECT)
-		ereport(ERROR,
-				(errcode(ERRCODE_CONNECTION_FAILURE),
-				 errmsg("cannot connect to SPI manager")));
-
-	/* switch from SPI back to original call memory context */
-	plr_SPI_context = MemoryContextSwitchTo(origcontext);
+	/* no SPI used yet */
+	plr_spi_init_done = false;
 
 	/* initialize R if needed */
 	plr_init_all(fcinfo->flinfo->fn_oid);
@@ -213,13 +207,8 @@ plr_call_handler(PG_FUNCTION_ARGS)
 	else
 		retval = plr_func_handler(fcinfo);
 
-	/* switch back to SPI memory context */
-	MemoryContextSwitchTo(plr_SPI_context);
-
-	if (SPI_finish() != SPI_OK_FINISH)
-		ereport(ERROR,
-				(errcode(ERRCODE_CONNECTION_EXCEPTION),
-				 errmsg("SPI_finish() failed")));
+	/* clean up if SPI was used, and regardless restore caller's context */
+	CLEANUP_PLR_SPI_CONTEXT(plr_caller_context);
 
 	/* restore caller's SPI context */
 	plr_SPI_context = plr_SPI_context_save;
@@ -481,7 +470,7 @@ plr_load_builtins(Oid funcid)
  * DO NOT make this static --- it has to be callable by reload_plr_modules()
  */
 void
-plr_load_modules(MemoryContext	plr_SPI_context)
+plr_load_modules(void)
 {
 	int				spi_rc;
 	char		   *cmd;
@@ -491,13 +480,17 @@ plr_load_modules(MemoryContext	plr_SPI_context)
 	char		   *modulesSql;
 
 	/* switch to SPI memory context */
-	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	SWITCHTO_PLR_SPI_CONTEXT(oldcontext);
 
 	/*
 	 * Check if table plr_modules exists
 	 */
 	if (!haveModulesTable(plr_nspOid))
+	{
+		/* clean up if SPI was used, and regardless restore caller's context */
+		CLEANUP_PLR_SPI_CONTEXT(oldcontext);
 		return;
+	}
 
 	/* plr_modules table exists -- get SQL code extract table's contents */
 	modulesSql = getModulesSql(plr_nspOid);
@@ -516,6 +509,8 @@ plr_load_modules(MemoryContext	plr_SPI_context)
 	if (SPI_processed == 0)
 	{
 		SPI_freetuptable(SPI_tuptable);
+		/* clean up if SPI was used, and regardless restore caller's context */
+		CLEANUP_PLR_SPI_CONTEXT(oldcontext);
 		return;
 	}
 
@@ -538,8 +533,8 @@ plr_load_modules(MemoryContext	plr_SPI_context)
 	}
 	SPI_freetuptable(SPI_tuptable);
 
-	/* back to caller's memory context */
-	MemoryContextSwitchTo(oldcontext);
+	/* clean up if SPI was used, and regardless restore caller's context */
+	CLEANUP_PLR_SPI_CONTEXT(oldcontext);
 }
 
 static void
@@ -567,7 +562,7 @@ plr_init_all(Oid funcid)
 		plr_nspOid = getNamespaceOidFromFunctionOid(funcid);
 
 		/* try to load procedures from plr_modules */
-		plr_load_modules(plr_SPI_context);
+		plr_load_modules();
 
 		plr_be_init_done = true;
 	}

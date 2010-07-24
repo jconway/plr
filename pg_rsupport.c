@@ -32,6 +32,7 @@
  */
 #include "plr.h"
 
+extern bool plr_spi_init_done;
 extern MemoryContext plr_SPI_context;
 extern char *last_R_error_msg;
 
@@ -146,7 +147,7 @@ plr_SPI_exec(SEXP rsql)
 		error("%s", "cannot exec empty query");
 
 	/* switch to SPI memory context */
-	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	SWITCHTO_PLR_SPI_CONTEXT(oldcontext);
 
 	/*
 	 * trap elog/ereport so we can let R finish up gracefully
@@ -345,7 +346,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 	UNPROTECT(1);
 
 	/* switch to SPI memory context */
-	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	SWITCHTO_PLR_SPI_CONTEXT(oldcontext);
 
 	/*
 	 * trap elog/ereport so we can let R finish up gracefully
@@ -501,7 +502,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	}
 
 	/* switch to SPI memory context */
-	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	SWITCHTO_PLR_SPI_CONTEXT(oldcontext);
 
 	/*
 	 * trap elog/ereport so we can let R finish up gracefully
@@ -659,7 +660,7 @@ plr_SPI_cursor_open(SEXP cursor_name_arg,SEXP rsaved_plan, SEXP rargvalues)
 	strncpy(cursor_name, CHAR(STRING_ELT(cursor_name_arg,0)), 64);
 
 	/* switch to SPI memory context */
-	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	SWITCHTO_PLR_SPI_CONTEXT(oldcontext);
 
 	/*
 	 * trap elog/ereport so we can let R finish up gracefully
@@ -713,7 +714,7 @@ plr_SPI_cursor_fetch(SEXP cursor_in,SEXP forward_in, SEXP rows_in)
 	rows  = INTEGER_DATA(rows_in)[0];
 
 	/* switch to SPI memory context */
-	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	SWITCHTO_PLR_SPI_CONTEXT(oldcontext);
 	PG_TRY();
 	{
 		/* Open the cursor */
@@ -750,7 +751,7 @@ plr_SPI_cursor_close(SEXP cursor_in)
 	portal = R_ExternalPtrAddr(cursor_in);
 
 	/* switch to SPI memory context */
-	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	SWITCHTO_PLR_SPI_CONTEXT(oldcontext);
 	PG_TRY();
 	{
 		/* Open the cursor */
@@ -787,7 +788,7 @@ plr_SPI_cursor_move(SEXP cursor_in,SEXP forward_in, SEXP rows_in)
 	rows  = INTEGER(rows_in)[0];
 
 	/* switch to SPI memory context */
-	oldcontext = MemoryContextSwitchTo(plr_SPI_context);
+	SWITCHTO_PLR_SPI_CONTEXT(oldcontext);
 	PG_TRY();
 	{
 		/* Open the cursor */
