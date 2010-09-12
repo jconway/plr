@@ -144,7 +144,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	 * Use the converted values to build an R vector.
 	 */
 	SEXP		result;
-	ArrayType  *v = DatumGetArrayTypeP(dvalue);
+	ArrayType  *v;
 	Oid			element_type;
 	int			i, j, k,
 				nitems,
@@ -162,6 +162,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 	if (dvalue == (Datum) NULL)
 		return R_NilValue;
 
+	v = DatumGetArrayTypeP(dvalue);
 	ndim = ARR_NDIM(v);
 	element_type = ARR_ELEMTYPE(v);
 	dim = ARR_DIMS(v);
@@ -418,7 +419,10 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 				SEXP		fldvec_elem;
 
 				dvalue = SPI_getbinval(tuples[i], tupdesc, j + 1, &isnull);
-				PROTECT(fldvec_elem = pg_array_get_r(dvalue, outputproc, typlen, typbyval, typalign));
+				if (!isnull)
+					PROTECT(fldvec_elem = pg_array_get_r(dvalue, outputproc, typlen, typbyval, typalign));
+				else
+					PROTECT(fldvec_elem = R_NilValue);
 
 				SET_VECTOR_ELT(fldvec, i, fldvec_elem);
 				UNPROTECT(1);

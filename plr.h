@@ -379,29 +379,8 @@ extern void R_RunExitFinalizers(void);
 #define PREPARE_PG_TRY \
 	ERRORCONTEXTCALLBACK
 #define SWITCHTO_PLR_SPI_CONTEXT(the_caller_context) \
-	if(plr_spi_init_done == false) \
-	{ \
-		the_caller_context = CurrentMemoryContext; \
-		if (SPI_connect() != SPI_OK_CONNECT) \
-			ereport(ERROR, \
-					(errcode(ERRCODE_CONNECTION_FAILURE), \
-					 errmsg("cannot connect to SPI manager"))); \
-		plr_SPI_context = CurrentMemoryContext; \
-		plr_spi_init_done = true; \
-	} \
-	else \
-		the_caller_context = MemoryContextSwitchTo(plr_SPI_context)
+	the_caller_context = MemoryContextSwitchTo(plr_SPI_context)
 #define CLEANUP_PLR_SPI_CONTEXT(the_caller_context) \
-	if(plr_spi_init_done) \
-	{ \
-		MemoryContextSwitchTo(plr_SPI_context); \
-		if (SPI_finish() != SPI_OK_FINISH) \
-			ereport(ERROR, \
-					(errcode(ERRCODE_CONNECTION_EXCEPTION), \
-					 errmsg("SPI_finish() failed"))); \
-		plr_SPI_context = NULL; \
-		plr_spi_init_done = false; \
-	} \
 	MemoryContextSwitchTo(the_caller_context)
 #define PLR_PG_CATCH() \
 		PG_CATCH(); \

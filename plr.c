@@ -37,7 +37,6 @@ PG_MODULE_MAGIC;
 /*
  * Global data
  */
-bool plr_spi_init_done;
 MemoryContext plr_caller_context;
 MemoryContext plr_SPI_context = NULL;
 HTAB *plr_HashTable = (HTAB *) NULL;
@@ -191,13 +190,14 @@ Datum
 plr_call_handler(PG_FUNCTION_ARGS)
 {
 	Datum			retval;
-	/* save caller's SPI context */
-	MemoryContext	plr_SPI_context_save = plr_SPI_context;
+
 	/* save caller's context */
 	plr_caller_context = CurrentMemoryContext;
 
-	/* no SPI used yet */
-	plr_spi_init_done = false;
+	if (SPI_connect() != SPI_OK_CONNECT)
+		elog(ERROR, "SPI_connect failed");
+	plr_SPI_context = CurrentMemoryContext;
+	MemoryContextSwitchTo(plr_caller_context);
 
 	/* initialize R if needed */
 	plr_init_all(fcinfo->flinfo->fn_oid);
@@ -206,12 +206,6 @@ plr_call_handler(PG_FUNCTION_ARGS)
 		retval = plr_trigger_handler(fcinfo);
 	else
 		retval = plr_func_handler(fcinfo);
-
-	/* clean up if SPI was used, and regardless restore caller's context */
-	CLEANUP_PLR_SPI_CONTEXT(plr_caller_context);
-
-	/* restore caller's SPI context */
-	plr_SPI_context = plr_SPI_context_save;
 
 	return retval;
 }
@@ -715,6 +709,8 @@ plr_trigger_handler(PG_FUNCTION_ARGS)
 	 * Convert the return value from an R object to a Datum.
 	 * We expect r_get_pg to do the right thing with missing or empty results.
 	 */
+	if (SPI_finish() != SPI_OK_FINISH)
+		elog(ERROR, "SPI_finish failed");
 	retval = r_get_pg(rvalue, function, fcinfo);
 
 	POP_PLERRCONTEXT;
@@ -751,6 +747,8 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	 * Convert the return value from an R object to a Datum.
 	 * We expect r_get_pg to do the right thing with missing or empty results.
 	 */
+	if (SPI_finish() != SPI_OK_FINISH)
+		elog(ERROR, "SPI_finish failed");
 	retval = r_get_pg(rvalue, function, fcinfo);
 
 	POP_PLERRCONTEXT;
@@ -1138,24 +1136,28 @@ do_compile(FunctionCallInfo fcinfo,
 									 0, 0, 0);
 			if (!HeapTupleIsValid(typeTup))
 			{
+				Oid		arg_typid = function->arg_typid[i];
+
 				xpfree(function->proname);
 				xpfree(function);
 				/* internal error */
-				elog(ERROR, "cache lookup failed for argument type %u",
-					 function->arg_typid[i]);
+				elog(ERROR, "cache lookup failed for argument type %u", arg_typid);
 			}
 			typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
 
-			/* Disallow pseudotype argument */
-			/* (note we already replaced ANYARRAY/ANYELEMENT) */
+			/* Disallow pseudotype argument
+			 * note we already replaced ANYARRAY/ANYELEMENT
+			 */
 			if (typeStruct->typtype == 'p')
 			{
+				Oid		arg_typid = function->arg_typid[i];
+
 				xpfree(function->proname);
 				xpfree(function);
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						 errmsg("plr functions cannot take type %s",
-								format_type_be(function->arg_typid[i]))));
+								format_type_be(arg_typid))));
 			}
 
 			if (typeStruct->typrelid != InvalidOid)

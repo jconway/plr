@@ -32,6 +32,8 @@
  */
 #include "plr.h"
 
+extern MemoryContext plr_SPI_context;
+
 #ifndef WIN32
 extern char **environ;
 #endif
@@ -48,7 +50,17 @@ PG_FUNCTION_INFO_V1(reload_plr_modules);
 Datum
 reload_plr_modules(PG_FUNCTION_ARGS)
 {
+	MemoryContext	plr_caller_context = CurrentMemoryContext;
+
+	if (SPI_connect() != SPI_OK_CONNECT)
+		elog(ERROR, "SPI_connect failed");
+	plr_SPI_context = CurrentMemoryContext;
+	MemoryContextSwitchTo(plr_caller_context);
+
 	plr_load_modules();
+
+	if (SPI_finish() != SPI_OK_FINISH)
+		elog(ERROR, "SPI_finish failed");
 
 	PG_RETURN_TEXT_P(PG_STR_GET_TEXT("OK"));
 }

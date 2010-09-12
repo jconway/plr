@@ -32,7 +32,6 @@
  */
 #include "plr.h"
 
-extern bool plr_spi_init_done;
 extern MemoryContext plr_SPI_context;
 extern char *last_R_error_msg;
 
