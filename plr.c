@@ -278,6 +278,7 @@ PLR_CLEANUP
 {
 	char   *buf;
 	char   *tmpdir = getenv("R_SESSION_TMPDIR");
+	int		ret;
 
 	R_dot_Last();
 	R_RunExitFinalizers();
@@ -292,7 +293,9 @@ PLR_CLEANUP
 		 */
 		buf = (char *) palloc(9 + 1 + strlen(tmpdir));
 		sprintf(buf, "rm -rf \"%s\"", tmpdir);
-		system(buf);
+
+		/* ignoring return value, but silence the compiler */
+		ret = system(buf);
 	}
 }
 
