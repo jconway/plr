@@ -34,7 +34,7 @@
 
 extern MemoryContext plr_SPI_context;
 
-#ifndef WIN32
+#if !defined(WIN32) && !defined(WIN64)
 extern char **environ;
 #endif
 
@@ -284,7 +284,7 @@ plr_environ(PG_FUNCTION_ARGS)
 	char			   *var_name;
 	char			   *var_val;
 	char			   *values[2];
-#ifndef WIN32
+#if !defined(WIN32) && !defined(WIN64)
 	char			  **current_env;
 #else
 	char			   *buf;
@@ -326,7 +326,7 @@ plr_environ(PG_FUNCTION_ARGS)
 	/* initialize our tuplestore */
 	tupstore = TUPLESTORE_BEGIN_HEAP;
 
-#ifndef WIN32
+#if !defined(WIN32) && !defined(WIN64)
 	for (current_env = environ;
 		 current_env != NULL && *current_env != NULL;
 		 current_env++)

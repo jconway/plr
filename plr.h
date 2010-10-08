@@ -95,7 +95,7 @@
 #if (R_VERSION >= 132096) /* R_VERSION >= 2.4.0 */
 #include "Rembedded.h"
 #endif
-#ifndef WIN32
+#if !defined(WIN32) && !defined(WIN64)
 #include "Rinterface.h"
 #endif
 #include "Rinternals.h"
