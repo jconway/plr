@@ -380,7 +380,7 @@ plr_init(void)
 	/* arrange for automatic cleanup at proc_exit */
 	on_proc_exit(plr_cleanup, 0);
 
-#if !defined(WIN32) && !defined(WIN64)
+#ifndef WIN32
 	/*
 	 * Force non-interactive mode since R may not do so.
 	 * See comment in Rembedded.c just after R_Interactive = TRUE:
