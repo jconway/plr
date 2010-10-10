@@ -41,6 +41,7 @@ static Datum get_trigger_tuple(SEXP rval, plr_function *function,
 									FunctionCallInfo fcinfo, bool *isnull);
 static Datum get_tuplestore(SEXP rval, plr_function *function,
 									FunctionCallInfo fcinfo, bool *isnull);
+static Datum get_simple_array_datum(SEXP rval, Oid typelem, bool *isnull);
 static Datum get_array_datum(SEXP rval, plr_function *function, int col, bool *isnull);
 static Datum get_frame_array_datum(SEXP rval, plr_function *function, int col,
 																bool *isnull);
@@ -367,7 +368,7 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 		bool		typbyval;
 		char		typdelim;
 		Oid			typoutput,
-					elemtypelem;
+					typioparam;
 		FmgrInfo	outputproc;
 		char		typalign;
 
@@ -395,7 +396,7 @@ pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc)
 		{
 			PROTECT(fldvec = NEW_LIST(nr));
 			get_type_io_data(typelem, IOFunc_output, &typlen, &typbyval,
-							 &typalign, &typdelim, &elemtypelem, &typoutput);
+							 &typalign, &typdelim, &typioparam, &typoutput);
 
 			fmgr_info(typoutput, &outputproc);
 		}
@@ -574,6 +575,30 @@ r_get_pg(SEXP rval, plr_function *function, FunctionCallInfo fcinfo)
 
 	if (isnull)
 		fcinfo->isnull = true;
+
+	return result;
+}
+
+/*
+ * Similar to r_get_pg, given an R value, convert to its pg representation
+ * Other than scalar, currently only prepared to be used with simple 1D vector
+ */
+Datum
+get_datum(SEXP rval, Oid typid, Oid typelem, FmgrInfo in_func, bool *isnull)
+{
+	Datum	result;
+
+	/* short circuit if return value is Null */
+	if (rval == R_NilValue || isNull(rval))	/* probably redundant */
+	{
+		*isnull = true;
+		return (Datum) 0;
+	}
+
+	if (typelem == InvalidOid)
+		result = get_scalar_datum(rval, typid, in_func, isnull);
+	else
+		result = get_simple_array_datum(rval, typelem, isnull);
 
 	return result;
 }
@@ -1060,6 +1085,96 @@ get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 	else
 		array = construct_md_array(dvalues, nulls, ndims, dims, lbs,
 									result_elem, typlen, typbyval, typalign);
+
+	dvalue = PointerGetDatum(array);
+
+	return dvalue;
+}
+
+/* return simple, one dimensional array */
+static Datum
+get_simple_array_datum(SEXP rval, Oid typelem, bool *isnull)
+{
+	Datum		dvalue;
+	SEXP		obj;
+	SEXP		rdims;
+	const char *value;
+	int16		typlen;
+	bool		typbyval;
+	char		typdelim;
+	Oid			typinput,
+				typioparam;
+	FmgrInfo	in_func;
+	char		typalign;
+	int			i;
+	Datum	   *dvalues = NULL;
+	ArrayType  *array;
+	int			nitems;
+	int		   *dims;
+	int		   *lbs;
+	bool	   *nulls;
+	bool		have_nulls = FALSE;
+	int			ndims = 1;
+
+	dims = palloc(ndims * sizeof(int));
+	lbs = palloc(ndims * sizeof(int));
+
+	/*
+	 * get the element type's in_func
+	 */
+	get_type_io_data(typelem, IOFunc_output, &typlen, &typbyval,
+					 &typalign, &typdelim, &typioparam, &typinput);
+
+	perm_fmgr_info(typinput, &in_func);
+
+	PROTECT(rdims = getAttrib(rval, R_DimSymbol));
+	if (length(rdims) > 1)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("greater than 1-dimensional arrays are " \
+						"not supported in this context")));
+
+	dims[0] = INTEGER(rdims)[0];
+	lbs[0] = 1;
+	UNPROTECT(1);
+
+	nitems = dims[0];
+	if (nitems == 0)
+	{
+		*isnull = true;
+		return (Datum) 0;
+	}
+
+	dvalues = (Datum *) palloc(nitems * sizeof(Datum));
+	nulls = (bool *) palloc(nitems * sizeof(bool));
+	PROTECT(obj =  AS_CHARACTER(rval));
+
+	for (i = 0; i < nitems; i++)
+	{
+		value = CHAR(STRING_ELT(obj, i));
+
+		if (STRING_ELT(obj, i) == NA_STRING || value == NULL)
+		{
+			nulls[i] = TRUE;
+			have_nulls = TRUE;
+		}
+		else
+		{
+			nulls[i] = FALSE;
+			dvalues[i] = FunctionCall3(&in_func,
+										CStringGetDatum(value),
+										(Datum) 0,
+										Int32GetDatum(-1));
+		}
+	}
+	UNPROTECT(1);
+
+	if (!have_nulls)
+		array = construct_md_array(dvalues, NULL, ndims, dims, lbs,
+									typelem, typlen, typbyval, typalign);
+	else
+		array = construct_md_array(dvalues, nulls, ndims, dims, lbs,
+									typelem, typlen, typbyval, typalign);
 
 	dvalue = PointerGetDatum(array);
 

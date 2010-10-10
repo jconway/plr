@@ -1082,8 +1082,8 @@ do_compile(FunctionCallInfo fcinfo,
 				function->result_elem = InvalidOid;
 			
 			/*
-			* if we have an array type, get the element type's in_func
-			*/
+			 * if we have an array type, get the element type's in_func
+			 */
 			if (function->result_elem != InvalidOid)
 			{
 				int16		typlen;

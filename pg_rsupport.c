@@ -330,7 +330,7 @@ plr_SPI_prepare(SEXP rsql, SEXP rargtypes)
 
 			get_type_io_data(typeids[i], IOFunc_input, &typlen, &typbyval,
 							 &typalign, &typdelim, &typelem, &typinput);
-			typelems[i] = typelem;
+			typelems[i] = get_element_type(typeids[i]);
 
 			MemoryContextSwitchTo(oldcontext);
 
@@ -455,6 +455,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	void			   *saved_plan = plan_desc->saved_plan;
 	int					nargs = plan_desc->nargs;
 	Oid				   *typeids = plan_desc->typeids;
+	Oid				   *typelems = plan_desc->typelems;
 	FmgrInfo		   *typinfuncs = plan_desc->typinfuncs;
 	int					i;
 	Datum			   *argvalues = NULL;
@@ -491,7 +492,7 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 	{
 		PROTECT(obj = VECTOR_ELT(rargvalues, i));
 
-		argvalues[i] = get_scalar_datum(obj, typeids[i], typinfuncs[i], &isnull);
+		argvalues[i] = get_datum(obj, typeids[i], typelems[i], typinfuncs[i], &isnull);
 		if (!isnull)
 			nulls[i] = ' ';
 		else
