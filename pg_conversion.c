@@ -296,7 +296,8 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 					 * the NA value appropriate for the data type.
 					 */
 					pg_get_one_r(value, element_type, &result, idx);
-					pfree(value);
+					if (value != NULL)
+						pfree(value);
 				}
 			}
 		}
