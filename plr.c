@@ -31,6 +31,7 @@
  * plr.c - Language handler and support functions
  */
 #include "plr.h"
+#include "libpq/pqsignal.h"
 
 PG_MODULE_MAGIC;
 
@@ -324,7 +325,7 @@ plr_init(void)
 {
 	char	   *r_home;
 	int			rargc;
-	char	   *rargv[] = {"PL/R", "--silent", "--no-save", "--no-restore"};
+	char	   *rargv[] = {"PL/R", "--slave", "--silent", "--no-save", "--no-restore"};
 
 	/* refuse to init more than once */
 	if (plr_pm_init_done)
@@ -389,6 +390,11 @@ plr_init(void)
 	 */
 	R_Interactive = false;
 #endif
+
+	/*
+	 * R seems to try to steal SIGINT in recent releases, so steal it back
+	 */
+	pqsignal(SIGINT, StatementCancelHandler);		/* cancel current query */
 
 	plr_pm_init_done = true;
 }
