@@ -543,7 +543,7 @@ plr_get_raw(PG_FUNCTION_ARGS)
 	brptr = VARDATA(bresult);
 	memcpy(brptr, (char *) RAW(result), rsize - VARHDRSZ);
 
-	UNPROTECT(2);
+	UNPROTECT(3);
 
 	PG_RETURN_BYTEA_P(bresult);
 }

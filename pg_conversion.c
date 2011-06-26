@@ -127,7 +127,7 @@ pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func)
 						 errdetail("R expression evaluation error caught in \"unserialize\".")));
 		}
 
-		UNPROTECT(2);
+		UNPROTECT(3);
 	}
 
 	return result;
@@ -769,7 +769,7 @@ get_trigger_tuple(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bo
 			if (values[j] != NULL)
 				pfree(values[j]);
 	}
-
+	UNPROTECT(1);
 	MemoryContextSwitchTo(oldcontext);
 
 	if (tuple)
