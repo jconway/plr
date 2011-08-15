@@ -171,12 +171,13 @@ static plr_function *do_compile(FunctionCallInfo fcinfo,
 								HeapTuple procTup,
 								plr_func_hashkey *hashkey);
 static SEXP plr_parse_func_body(const char *body);
-static SEXP plr_convertargs(plr_function *function, Datum *arg, bool *argnull);
+static SEXP plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallInfo fcinfo);
 static void plr_error_callback(void *arg);
 static Oid getNamespaceOidFromFunctionOid(Oid fnOid);
 static bool haveModulesTable(Oid nspOid);
 static char *getModulesSql(Oid nspOid);
 static char **fetchArgNames(HeapTuple procTup, int nargs);
+static void WinGetFrameData(WindowObject winobj, int argno, Datum *dvalues, bool *isnull, int *numels, bool *has_nulls);
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -215,8 +216,7 @@ void
 load_r_cmd(const char *cmd)
 {
 	SEXP		cmdSexp,
-				cmdexpr,
-				ans = R_NilValue;
+				cmdexpr;
 	int			i,
 				status;
 
@@ -248,7 +248,7 @@ load_r_cmd(const char *cmd)
 	/* Loop is needed here as EXPSEXP may be of length > 1 */
 	for(i = 0; i < length(cmdexpr); i++)
 	{
-		ans = R_tryEval(VECTOR_ELT(cmdexpr, i), R_GlobalEnv, &status);
+		R_tryEval(VECTOR_ELT(cmdexpr, i), R_GlobalEnv, &status);
 		if(status != 0)
 		{
 			if (last_R_error_msg)
@@ -279,7 +279,6 @@ PLR_CLEANUP
 {
 	char   *buf;
 	char   *tmpdir = getenv("R_SESSION_TMPDIR");
-	int		ret;
 
 	R_dot_Last();
 	R_RunExitFinalizers();
@@ -295,8 +294,8 @@ PLR_CLEANUP
 		buf = (char *) palloc(9 + 1 + strlen(tmpdir));
 		sprintf(buf, "rm -rf \"%s\"", tmpdir);
 
-		/* ignoring return value, but silence the compiler */
-		ret = system(buf);
+		/* ignoring return value */
+		system(buf);
 	}
 }
 
@@ -709,7 +708,7 @@ plr_trigger_handler(PG_FUNCTION_ARGS)
 	PROTECT(fun = function->fun);
 
 	/* Convert all call arguments */
-	PROTECT(rargs = plr_convertargs(function, arg, argnull));
+	PROTECT(rargs = plr_convertargs(function, arg, argnull, fcinfo));
 
 	/* Call the R function */
 	PROTECT(rvalue = call_r_func(fun, rargs));
@@ -747,7 +746,7 @@ plr_func_handler(PG_FUNCTION_ARGS)
 	PROTECT(fun = function->fun);
 
 	/* Convert all call arguments */
-	PROTECT(rargs = plr_convertargs(function, fcinfo->arg, fcinfo->argnull));
+	PROTECT(rargs = plr_convertargs(function, fcinfo->arg, fcinfo->argnull, fcinfo));
 
 	/* Call the R function */
 	PROTECT(rvalue = call_r_func(fun, rargs));
@@ -944,6 +943,9 @@ do_compile(FunctionCallInfo fcinfo,
 	function->proname = pstrdup(proname);
 	function->fn_xmin = HeapTupleHeaderGetXmin(procTup->t_data);
 	function->fn_tid = procTup->t_self;
+
+	/* Flag for window functions */
+	function->iswindow = procStruct->proiswindow;
 
 	/* Lookup the pg_language tuple by Oid*/
 	langTup = SearchSysCache(LANGOID,
@@ -1214,6 +1216,15 @@ do_compile(FunctionCallInfo fcinfo,
 			}
 		}
 		FREE_ARG_NAMES;
+
+		if (function->iswindow)
+		{
+			for (i = 0; i < function->nargs; i++)
+			{
+				appendStringInfo(proc_internal_args, ",");
+				SET_FRAME_ARG_NAME;
+			}
+		}
 	}
 	else
 	{
@@ -1452,17 +1463,28 @@ call_r_func(SEXP fun, SEXP rargs)
 }
 
 static SEXP
-plr_convertargs(plr_function *function, Datum *arg, bool *argnull)
+plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallInfo fcinfo)
 {
 	int		i;
 	SEXP	rargs,
 			el;
 
-	/*
-	 * Create an array of R objects with the number of elements
-	 * equal to the number of arguments.
-	 */
-	PROTECT(rargs = allocVector(VECSXP, function->nargs));
+	if (!function->iswindow)
+	{
+		/*
+		* Create an array of R objects with the number of elements
+		* equal to the number of arguments.
+		*/
+		PROTECT(rargs = allocVector(VECSXP, function->nargs));
+	}
+	else
+	{
+		/*
+		* Create an array of R objects with the number of elements
+		* equal to twice the number of arguments.
+		*/
+		PROTECT(rargs = allocVector(VECSXP, 2 * function->nargs));
+	}
 
 	/*
 	 * iterate over the arguments, convert each of them and put them in
@@ -1470,41 +1492,113 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull)
 	 */
 	for (i = 0; i < function->nargs; i++)
 	{
-		if (argnull[i])
+		if (!function->iswindow)
 		{
-			/* fast track for null arguments */
-			PROTECT(el = R_NilValue);
-		}
-		else if (function->arg_is_rel[i])
-		{
-			/* for tuple args, convert to a one row data.frame */
-			CONVERT_TUPLE_TO_DATAFRAME;
-		}
-		else if (function->arg_elem[i] == InvalidOid)
-		{
-			/* for scalar args, convert to a one row vector */
-			Datum		dvalue = arg[i];
-			Oid			arg_typid = function->arg_typid[i];
-			FmgrInfo	arg_out_func = function->arg_out_func[i];
+			if (argnull[i])
+			{
+				/* fast track for null arguments */
+				PROTECT(el = R_NilValue);
+			}
+			else if (function->arg_is_rel[i])
+			{
+				/* for tuple args, convert to a one row data.frame */
+				CONVERT_TUPLE_TO_DATAFRAME;
+			}
+			else if (function->arg_elem[i] == InvalidOid)
+			{
+				/* for scalar args, convert to a one row vector */
+				Datum		dvalue = arg[i];
+				Oid			arg_typid = function->arg_typid[i];
+				FmgrInfo	arg_out_func = function->arg_out_func[i];
 
-			PROTECT(el = pg_scalar_get_r(dvalue, arg_typid, arg_out_func));
+				PROTECT(el = pg_scalar_get_r(dvalue, arg_typid, arg_out_func));
+			}
+			else
+			{
+				/* better be a pg array arg, convert to a multi-row vector */
+				Datum		dvalue = (Datum) PG_DETOAST_DATUM(arg[i]);
+				FmgrInfo	out_func = function->arg_elem_out_func[i];
+				int			typlen = function->arg_elem_typlen[i];
+				bool		typbyval = function->arg_elem_typbyval[i];
+				char		typalign = function->arg_elem_typalign[i];
+
+				PROTECT(el = pg_array_get_r(dvalue, out_func, typlen, typbyval, typalign));
+			}
+			SET_VECTOR_ELT(rargs, i, el);
+			UNPROTECT(1);
 		}
 		else
 		{
-			/* better be a pg array arg, convert to a multi-row vector */
-			Datum		dvalue = (Datum) PG_DETOAST_DATUM(arg[i]);
-			FmgrInfo	out_func = function->arg_elem_out_func[i];
-			int			typlen = function->arg_elem_typlen[i];
-			bool		typbyval = function->arg_elem_typbyval[i];
-			char		typalign = function->arg_elem_typalign[i];
+			Datum			dvalue;
+			bool			isnull;
+			WindowObject	winobj = PG_WINDOW_OBJECT();
 
-			PROTECT(el = pg_array_get_r(dvalue, out_func, typlen, typbyval, typalign));
+			/* get datum for the current row of the window frame */
+			dvalue = WinGetFuncArgInFrame(winobj, i, 0, WINDOW_SEEK_CURRENT, false, &isnull, NULL);
+
+			if (isnull)
+			{
+				/* fast track for null arguments */
+				PROTECT(el = R_NilValue);
+			}
+			else if (function->arg_is_rel[i])
+			{
+				/* keep compiler quiet */
+				el = R_NilValue;
+
+				elog(ERROR, "Tuple arguments not supported in PL/R Window Functions");
+			}
+			else if (function->arg_elem[i] == InvalidOid)
+			{
+				/* for scalar args, convert to a one row vector */
+				Oid			arg_typid = function->arg_typid[i];
+				FmgrInfo	arg_out_func = function->arg_out_func[i];
+
+				PROTECT(el = pg_scalar_get_r(dvalue, arg_typid, arg_out_func));
+			}
+			else
+			{
+				/* better be a pg array arg, convert to a multi-row vector */
+				FmgrInfo	out_func = function->arg_elem_out_func[i];
+				int			typlen = function->arg_elem_typlen[i];
+				bool		typbyval = function->arg_elem_typbyval[i];
+				char		typalign = function->arg_elem_typalign[i];
+
+				dvalue = (Datum) PG_DETOAST_DATUM(dvalue);
+				PROTECT(el = pg_array_get_r(dvalue, out_func, typlen, typbyval, typalign));
+			}
+			SET_VECTOR_ELT(rargs, i, el);
+			UNPROTECT(1);
 		}
-
-		SET_VECTOR_ELT(rargs, i, el);
-		UNPROTECT(1);
 	}
 
+	/* now get an array of datums for the entire window frame for each argument */
+	if (function->iswindow)
+	{
+		WindowObject	winobj = PG_WINDOW_OBJECT();
+		int64			totalrows = WinGetPartitionRowCount(winobj);
+		Datum		   *dvalues = palloc0(totalrows * sizeof(Datum));
+		bool		   *isnulls = palloc0(totalrows * sizeof(bool));
+		int				numels;
+		Oid				datum_typid;
+		FmgrInfo		datum_out_func;
+		bool			datum_typbyval;
+		bool			has_nulls;
+
+		for (i = 0; i < function->nargs; i++)
+		{
+			WinGetFrameData(winobj, i, dvalues, isnulls, &numels, &has_nulls);
+
+			datum_typid = function->arg_typid[i];
+			datum_out_func = function->arg_out_func[i];
+			datum_typbyval = function->arg_elem_typbyval[i];
+			PROTECT(el = pg_datum_array_get_r(dvalues, isnulls, numels, has_nulls,
+											  datum_typid, datum_out_func, datum_typbyval));
+
+			SET_VECTOR_ELT(rargs, i + 1, el);
+			UNPROTECT(1);
+		}
+	}
 	UNPROTECT(1);
 
 	return(rargs);
@@ -1672,3 +1766,51 @@ pg_unprotect(int n, char *fn, int ln)
 	unprotect(n);
 }
 #endif /* DEBUGPROTECT */
+
+/*
+ * WinGetFrameData
+ *		Evaluate a window function's argument expression on a specified
+ *		window frame, returning an array of Datums for the frame
+ *
+ * argno: argument number to evaluate (counted from 0)
+ * isnull: output argument, receives isnull status of result
+ */
+static void
+WinGetFrameData(WindowObject winobj, int argno, Datum *dvalues, bool *isnulls, int *numels, bool *has_nulls)
+{
+	int64		i = 0;
+
+	*has_nulls = false;
+	for(;;)
+	{
+		Datum	lcl_dvalue;
+		bool	lcl_isnull;
+		bool	isout;
+		bool	set_mark;
+
+		if (i > 0)
+			set_mark = false;
+		else
+			set_mark = true;
+
+		lcl_dvalue = WinGetFuncArgInFrame(winobj, argno, i, WINDOW_SEEK_HEAD,
+										  set_mark, &lcl_isnull, &isout);
+
+		if (!isout)
+		{
+			dvalues[i] = lcl_dvalue;
+			isnulls[i] = lcl_isnull;
+			if (lcl_isnull)
+				*has_nulls = true;
+		}
+		else
+		{
+			*numels = i;
+			break;
+		}
+
+		i++;
+	};
+}
+
+

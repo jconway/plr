@@ -323,6 +323,131 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 }
 
 /*
+ * Given an array pg datums, convert to a multi-row R vector.
+ */
+SEXP
+pg_datum_array_get_r(Datum *elem_values, bool *elem_nulls, int numels, bool has_nulls,
+					 Oid element_type, FmgrInfo out_func, bool typbyval)
+{
+	/*
+	 * Loop through and convert each scalar value.
+	 * Use the converted values to build an R vector.
+	 */
+	SEXP		result;
+	int			i;
+	bool		fast_track_type;
+
+	switch (element_type)
+	{
+		case INT4OID:
+		case FLOAT8OID:
+			fast_track_type = true;
+			break;
+		default:
+			fast_track_type = false;
+	}
+
+	/*
+	 * Special case for pass-by-value data types, if the following conditions are met:
+	 * 		designated fast_track_type
+	 * 		no NULL elements
+	 * 		1 dimensional array only
+	 * 		at least one element
+	 */
+	if (fast_track_type &&
+		 typbyval &&
+		 !has_nulls &&
+		 (numels > 0))
+	{
+		SEXP	matrix_dims;
+
+		/* get new vector of the appropriate type and length */
+		PROTECT(result = get_r_vector(element_type, numels));
+
+		/* keep this in sync with switch above -- fast_track_type only */
+		switch (element_type)
+		{
+			case INT4OID:
+				Assert(sizeof(int) == 4);
+				memcpy(INTEGER_DATA(result), elem_values, numels * sizeof(int));
+				break;
+			case FLOAT8OID:
+				Assert(sizeof(double) == 8);
+				memcpy(NUMERIC_DATA(result), elem_values, numels * sizeof(double));
+				break;
+			default:
+				/* Everything else is error */
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("direct array passthrough attempted for unsupported type")));
+		}
+
+		/* attach dimensions */
+		PROTECT(matrix_dims = allocVector(INTSXP, 1));
+		INTEGER_DATA(matrix_dims)[0] = numels;
+		setAttrib(result, R_DimSymbol, matrix_dims);
+		UNPROTECT(1);
+
+		UNPROTECT(1);	/* result */
+	}
+	else
+	{
+		SEXP	matrix_dims;
+
+		/* array is empty */
+		if (numels == 0)
+		{
+			PROTECT(result = get_r_vector(element_type, 0));
+			UNPROTECT(1);
+
+			return result;
+		}
+
+		/* get new vector of the appropriate type and length */
+		PROTECT(result = get_r_vector(element_type, numels));
+
+		/* Convert all values to their R form and build the vector */
+		for (i = 0; i < numels; i++)
+		{
+			char	   *value;
+			Datum		itemvalue;
+			bool		isnull;
+
+			isnull = elem_nulls[i];
+			itemvalue = elem_values[i];
+
+			if (!isnull)
+			{
+				value = DatumGetCString(FunctionCall3(&out_func,
+													  itemvalue,
+													  (Datum) 0,
+													  Int32GetDatum(-1)));
+			}
+			else
+				value = NULL;
+
+			/*
+			 * Note that pg_get_one_r() replaces NULL values with
+			 * the NA value appropriate for the data type.
+			 */
+			pg_get_one_r(value, element_type, &result, i);
+			if (value != NULL)
+				pfree(value);
+		}
+
+		/* attach dimensions */
+		PROTECT(matrix_dims = allocVector(INTSXP, 1));
+		INTEGER_DATA(matrix_dims)[0] = numels;
+		setAttrib(result, R_DimSymbol, matrix_dims);
+		UNPROTECT(1);
+
+		UNPROTECT(1);	/* result */
+	}
+
+	return result;
+}
+
+/*
  * Given an array of pg tuples, convert to an R list
  * the created object is not quite actually a data.frame
  */

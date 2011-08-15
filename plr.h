@@ -38,6 +38,7 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "windowapi.h"
 #include "access/heapam.h"
 #include "catalog/catversion.h"
 #include "catalog/pg_language.h"
@@ -59,6 +60,7 @@
 #endif
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/rel.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
 
@@ -371,6 +373,10 @@ extern void R_RunExitFinalizers(void);
 		else \
 			appendStringInfo(proc_internal_args, "arg%d", i + 1); \
 	} while (0)
+#define SET_FRAME_ARG_NAME \
+	do { \
+		appendStringInfo(proc_internal_args, "farg%d", i + 1); \
+	} while (0)
 #define FREE_ARG_NAMES \
 	do { \
 		if (argnames) \
@@ -389,6 +395,7 @@ extern void R_RunExitFinalizers(void);
 			ErrorData  *edata; \
 			SWITCHTO_PLR_SPI_CONTEXT(temp_context); \
 			edata = CopyErrorData(); \
+			MemoryContextSwitchTo(temp_context); \
 			error("error in SQL statement : %s", edata->message); \
 		}
 #define PLR_PG_END_TRY() \
@@ -451,6 +458,7 @@ typedef struct plr_function
 	char				arg_elem_typalign[FUNC_MAX_ARGS];
 	int					arg_is_rel[FUNC_MAX_ARGS];
 	SEXP				fun;	/* compiled R function */
+	bool				iswindow;
 }	plr_function;
 
 /* compiled function hash table */
@@ -478,6 +486,8 @@ extern SEXP call_r_func(SEXP fun, SEXP rargs);
 /* argument and return value conversion functions */
 extern SEXP pg_scalar_get_r(Datum dvalue, Oid arg_typid, FmgrInfo arg_out_func);
 extern SEXP pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char typalign);
+extern SEXP pg_datum_array_get_r(Datum *elem_values, bool *elem_nulls, int numels, bool has_nulls,
+								 Oid element_type, FmgrInfo out_func, bool typbyval);
 extern SEXP pg_tuple_get_r_frame(int ntuples, HeapTuple *tuples, TupleDesc tupdesc);
 extern Datum r_get_pg(SEXP rval, plr_function *function, FunctionCallInfo fcinfo);
 extern Datum get_datum(SEXP rval, Oid typid, Oid typelem, FmgrInfo in_func, bool *isnull);
