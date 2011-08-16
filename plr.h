@@ -40,7 +40,9 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#if PG_VERSION_NUM >= 80400
 #include "windowapi.h"
+#endif
 #include "access/heapam.h"
 #include "catalog/catversion.h"
 #include "catalog/pg_language.h"
@@ -138,8 +140,14 @@
 #error "This version of PL/R only builds with PostgreSQL 8.2 or later"
 #elif PG_VERSION_NUM < 80300
 #define PG_VERSION_82_COMPAT
-#else
+#elif PG_VERSION_NUM < 80400
 #define PG_VERSION_83_COMPAT
+#else
+#define PG_VERSION_84_COMPAT
+#endif
+
+#ifdef PG_VERSION_84_COMPAT
+#define HAVE_WINDOW_FUNCTIONS
 #endif
 
 #ifdef DEBUGPROTECT
@@ -460,7 +468,9 @@ typedef struct plr_function
 	char				arg_elem_typalign[FUNC_MAX_ARGS];
 	int					arg_is_rel[FUNC_MAX_ARGS];
 	SEXP				fun;	/* compiled R function */
+#ifdef HAVE_WINDOW_FUNCTIONS
 	bool				iswindow;
+#endif
 }	plr_function;
 
 /* compiled function hash table */

@@ -177,7 +177,9 @@ static Oid getNamespaceOidFromFunctionOid(Oid fnOid);
 static bool haveModulesTable(Oid nspOid);
 static char *getModulesSql(Oid nspOid);
 static char **fetchArgNames(HeapTuple procTup, int nargs);
+#ifdef HAVE_WINDOW_FUNCTIONS
 static void WinGetFrameData(WindowObject winobj, int argno, Datum *dvalues, bool *isnull, int *numels, bool *has_nulls);
+#endif
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -944,8 +946,10 @@ do_compile(FunctionCallInfo fcinfo,
 	function->fn_xmin = HeapTupleHeaderGetXmin(procTup->t_data);
 	function->fn_tid = procTup->t_self;
 
+#ifdef HAVE_WINDOW_FUNCTIONS
 	/* Flag for window functions */
 	function->iswindow = procStruct->proiswindow;
+#endif
 
 	/* Lookup the pg_language tuple by Oid*/
 	langTup = SearchSysCache(LANGOID,
@@ -1217,6 +1221,7 @@ do_compile(FunctionCallInfo fcinfo,
 		}
 		FREE_ARG_NAMES;
 
+#ifdef HAVE_WINDOW_FUNCTIONS
 		if (function->iswindow)
 		{
 			for (i = 0; i < function->nargs; i++)
@@ -1225,6 +1230,7 @@ do_compile(FunctionCallInfo fcinfo,
 				SET_FRAME_ARG_NAME;
 			}
 		}
+#endif
 	}
 	else
 	{
@@ -1466,25 +1472,28 @@ static SEXP
 plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallInfo fcinfo)
 {
 	int		i;
+	int		m = 1;
+	int		c = 0;
 	SEXP	rargs,
 			el;
 
-	if (!function->iswindow)
+#ifdef HAVE_WINDOW_FUNCTIONS
+	if (function->iswindow)
 	{
 		/*
-		* Create an array of R objects with the number of elements
-		* equal to the number of arguments.
-		*/
-		PROTECT(rargs = allocVector(VECSXP, function->nargs));
+		 * For WINDOW functions, create an array of R objects with
+		 * the number of elements equal to twice the number of arguments.
+		 */
+		m = 2;
+		c = 0;
 	}
-	else
-	{
-		/*
-		* Create an array of R objects with the number of elements
-		* equal to twice the number of arguments.
-		*/
-		PROTECT(rargs = allocVector(VECSXP, 2 * function->nargs));
-	}
+#endif
+
+	/*
+	 * Create an array of R objects with the number of elements
+	 * as a function of the number of arguments.
+	 */
+	PROTECT(rargs = allocVector(VECSXP, c + (m * function->nargs)));
 
 	/*
 	 * iterate over the arguments, convert each of them and put them in
@@ -1492,8 +1501,10 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallI
 	 */
 	for (i = 0; i < function->nargs; i++)
 	{
+#ifdef HAVE_WINDOW_FUNCTIONS
 		if (!function->iswindow)
 		{
+#endif
 			if (argnull[i])
 			{
 				/* fast track for null arguments */
@@ -1526,6 +1537,7 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallI
 			}
 			SET_VECTOR_ELT(rargs, i, el);
 			UNPROTECT(1);
+#ifdef HAVE_WINDOW_FUNCTIONS
 		}
 		else
 		{
@@ -1570,8 +1582,10 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallI
 			SET_VECTOR_ELT(rargs, i, el);
 			UNPROTECT(1);
 		}
+#endif
 	}
 
+#ifdef HAVE_WINDOW_FUNCTIONS
 	/* now get an array of datums for the entire window frame for each argument */
 	if (function->iswindow)
 	{
@@ -1599,8 +1613,9 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallI
 			UNPROTECT(1);
 		}
 	}
-	UNPROTECT(1);
+#endif
 
+	UNPROTECT(1);
 	return(rargs);
 }
 
@@ -1767,6 +1782,7 @@ pg_unprotect(int n, char *fn, int ln)
 }
 #endif /* DEBUGPROTECT */
 
+#ifdef HAVE_WINDOW_FUNCTIONS
 /*
  * WinGetFrameData
  *		Evaluate a window function's argument expression on a specified
@@ -1812,5 +1828,5 @@ WinGetFrameData(WindowObject winobj, int argno, Datum *dvalues, bool *isnulls, i
 		i++;
 	};
 }
-
+#endif
 
