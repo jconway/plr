@@ -6,6 +6,11 @@ AS 'MODULE_PATHNAME' LANGUAGE C;
 
 CREATE LANGUAGE plr HANDLER plr_call_handler;
 
+CREATE OR REPLACE FUNCTION plr_version ()
+RETURNS text
+AS 'MODULE_PATHNAME','plr_version'
+LANGUAGE 'C';
+
 CREATE OR REPLACE FUNCTION reload_plr_modules ()
 RETURNS text
 AS 'MODULE_PATHNAME','reload_plr_modules'

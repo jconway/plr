@@ -3,6 +3,13 @@
 -- does not depend on contents of plr.sql.
 --
 \set ECHO none
+-- check version
+SELECT plr_version();
+ plr_version 
+-------------
+ 08.03.00.13
+(1 row)
+
 -- make typenames available in the global namespace
 select load_r_typenames();
  load_r_typenames 

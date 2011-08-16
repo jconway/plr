@@ -33,6 +33,8 @@
 #ifndef PLR_H
 #define PLR_H
 
+#define PLR_VERSION		"08.03.00.13"
+
 #include "postgres.h"
 
 #include "fmgr.h"
@@ -508,6 +510,7 @@ extern SEXP plr_SPI_lastoid(void);
 extern void throw_r_error(const char **msg);
 
 /* Postgres callable functions useful in conjunction with PL/R */
+extern Datum plr_version(PG_FUNCTION_ARGS);
 extern Datum reload_plr_modules(PG_FUNCTION_ARGS);
 extern Datum install_rcmd(PG_FUNCTION_ARGS);
 extern Datum plr_array_push(PG_FUNCTION_ARGS);

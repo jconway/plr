@@ -6,6 +6,9 @@
 \i plr.sql
 \set ECHO all
 
+-- check version
+SELECT plr_version();
+
 -- make typenames available in the global namespace
 select load_r_typenames();
 

@@ -42,6 +42,18 @@ static ArrayType *plr_array_create(FunctionCallInfo fcinfo,
 								   int numelems, int elem_start);
 
 /*-----------------------------------------------------------------------------
+ * plr_version :
+ *		output PL/R version string
+ *----------------------------------------------------------------------------
+ */
+PG_FUNCTION_INFO_V1(plr_version);
+Datum
+plr_version(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_TEXT_P(PG_STR_GET_TEXT(PLR_VERSION));
+}
+
+/*-----------------------------------------------------------------------------
  * reload_modules :
  *		interface to allow plr_modules to be reloaded on demand
  *----------------------------------------------------------------------------
