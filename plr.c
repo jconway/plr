@@ -1182,6 +1182,9 @@ do_compile(FunctionCallInfo fcinfo,
 
 			perm_fmgr_info(typeStruct->typoutput, &(function->arg_out_func[i]));
 
+			/* save argument typbyval in case we need for optimization in conversions */
+			function->arg_typbyval[i] = typeStruct->typbyval;
+
 			/*
 			 * Is argument type an array? get_element_type will return InvalidOid
 			 * instead of actual element type if the type is not a varlena array.
@@ -1229,6 +1232,7 @@ do_compile(FunctionCallInfo fcinfo,
 				appendStringInfo(proc_internal_args, ",");
 				SET_FRAME_ARG_NAME;
 			}
+			SET_FRAME_XARG_NAMES;
 		}
 #endif
 	}
@@ -1485,7 +1489,7 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallI
 		 * the number of elements equal to twice the number of arguments.
 		 */
 		m = 2;
-		c = 0;
+		c = 2;
 	}
 #endif
 
@@ -1591,27 +1595,45 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallI
 	{
 		WindowObject	winobj = PG_WINDOW_OBJECT();
 		int64			totalrows = WinGetPartitionRowCount(winobj);
-		Datum		   *dvalues = palloc0(totalrows * sizeof(Datum));
-		bool		   *isnulls = palloc0(totalrows * sizeof(bool));
 		int				numels;
-		Oid				datum_typid;
-		FmgrInfo		datum_out_func;
-		bool			datum_typbyval;
-		bool			has_nulls;
 
 		for (i = 0; i < function->nargs; i++)
 		{
+			Datum		   *dvalues = palloc0(totalrows * sizeof(Datum));
+			bool		   *isnulls = palloc0(totalrows * sizeof(bool));
+			Oid				datum_typid;
+			FmgrInfo		datum_out_func;
+			bool			datum_typbyval;
+			bool			has_nulls;
+
 			WinGetFrameData(winobj, i, dvalues, isnulls, &numels, &has_nulls);
 
 			datum_typid = function->arg_typid[i];
 			datum_out_func = function->arg_out_func[i];
-			datum_typbyval = function->arg_elem_typbyval[i];
+			datum_typbyval = function->arg_typbyval[i];
 			PROTECT(el = pg_datum_array_get_r(dvalues, isnulls, numels, has_nulls,
 											  datum_typid, datum_out_func, datum_typbyval));
 
-			SET_VECTOR_ELT(rargs, i + 1, el);
+			/*
+			 * We already set function->nargs arguments
+			 * so we must start with a function->nargs
+			 */
+			SET_VECTOR_ELT(rargs, function->nargs + i, el);
+
 			UNPROTECT(1);
 		}
+
+		/* fnumrows */
+		PROTECT(el = NEW_NUMERIC(1));
+		NUMERIC_DATA(el)[0] = (double) numels;
+		SET_VECTOR_ELT(rargs, m * function->nargs + 0, el);
+		UNPROTECT(1);
+
+		/* prownum */
+		PROTECT(el = NEW_NUMERIC(1));
+		NUMERIC_DATA(el)[0] = (double) WinGetCurrentPosition(winobj) + 1;;
+		SET_VECTOR_ELT(rargs, m * function->nargs + 1, el);
+		UNPROTECT(1);
 	}
 #endif
 

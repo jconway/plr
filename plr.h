@@ -387,6 +387,10 @@ extern void R_RunExitFinalizers(void);
 	do { \
 		appendStringInfo(proc_internal_args, "farg%d", i + 1); \
 	} while (0)
+#define SET_FRAME_XARG_NAMES \
+	do { \
+		appendStringInfo(proc_internal_args, ",fnumrows,prownum"); \
+	} while (0)
 #define FREE_ARG_NAMES \
 	do { \
 		if (argnames) \
@@ -460,6 +464,7 @@ typedef struct plr_function
 	char			   *result_fld_elem_typalign;
 	int					nargs;
 	Oid					arg_typid[FUNC_MAX_ARGS];
+	bool				arg_typbyval[FUNC_MAX_ARGS];
 	FmgrInfo			arg_out_func[FUNC_MAX_ARGS];
 	Oid					arg_elem[FUNC_MAX_ARGS];
 	FmgrInfo			arg_elem_out_func[FUNC_MAX_ARGS];
