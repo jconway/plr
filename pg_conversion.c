@@ -680,6 +680,17 @@ r_get_pg(SEXP rval, plr_function *function, FunctionCallInfo fcinfo)
 	bool	isnull = false;
 	Datum	result;
 
+	if (function->result_typid != BYTEAOID &&
+		(TYPEOF(rval) == CLOSXP ||
+		 TYPEOF(rval) == PROMSXP ||
+		 TYPEOF(rval) == LANGSXP ||
+		 TYPEOF(rval) == ENVSXP))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_EXCEPTION),
+				 errmsg("incorrect function return type"),
+				 errdetail("R return value type cannot be mapped to PostgreSQL return type."),
+				 errhint("Try BYTEA as the PostgreSQL return type.")));
+
 	if (CALLED_AS_TRIGGER(fcinfo))
 		result = get_trigger_tuple(rval, function, fcinfo, &isnull);
 	else if (function->result_istuple || fcinfo->flinfo->fn_retset)
