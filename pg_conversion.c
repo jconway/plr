@@ -1538,18 +1538,34 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 		 typbyval &&
 		 !has_na)
 	{
-		dims[0] = objlen;
-		lbs[0] = 1;
+		int32		nbytes;
+		int32		dataoffset;
 
 		if (TYPEOF(rval) == INTSXP)
+		{
+			nbytes = objlen * sizeof(INTEGER_DATA(rval));
 			dvalues = (Datum *) INTEGER_DATA(rval);
+		}
 		else if (TYPEOF(rval) == REALSXP)
+		{
+			nbytes = objlen * sizeof(NUMERIC_DATA(rval));
 			dvalues = (Datum *) NUMERIC_DATA(rval);
+		}
 		else
 			elog(ERROR, "attempted to passthrough invalid R datatype to Postgresql");
 
-		array = construct_md_array(dvalues, NULL, ndims, dims, lbs,
-									result_elem, typlen, typbyval, typalign);
+		dims[0] = objlen;
+		lbs[0] = 1;
+		dataoffset = 0;			/* marker for no null bitmap */
+
+		array = (ArrayType *) palloc0(nbytes + ARR_OVERHEAD_NONULLS(ndims));
+		SET_VARSIZE(array, nbytes + ARR_OVERHEAD_NONULLS(ndims));
+		array->ndim = ndims;
+		array->dataoffset = dataoffset;
+		array->elemtype = result_elem;
+		memcpy(ARR_DIMS(array), dims, ndims * sizeof(int));
+		memcpy(ARR_LBOUND(array), lbs, ndims * sizeof(int));
+		memcpy(ARR_DATA_PTR(array), dvalues, nbytes);
 
 		dvalue = PointerGetDatum(array);
 	}
