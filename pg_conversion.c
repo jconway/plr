@@ -215,7 +215,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 						 errmsg("direct array passthrough attempted for unsupported type")));
 		}
 
-		if (ndim > 0)
+		if (ndim > 1)
 		{
 			SEXP	matrix_dims;
 
@@ -304,7 +304,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 		pfree(elem_values);
 		pfree(elem_nulls);
 
-		if (ndim > 0)
+		if (ndim > 1)
 		{
 			SEXP	matrix_dims;
 
@@ -316,6 +316,7 @@ pg_array_get_r(Datum dvalue, FmgrInfo out_func, int typlen, bool typbyval, char 
 			setAttrib(result, R_DimSymbol, matrix_dims);
 			UNPROTECT(1);
 		}
+
 		UNPROTECT(1);	/* result */
 	}
 
@@ -1166,7 +1167,13 @@ get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 			/* internal error */
 			elog(ERROR, "plr: bad internal representation of data.frame");
 
-		if (ATTRIB(dfcol) == R_NilValue)
+		/*
+		 * Not sure about this test. Need to reliably detect
+		 * factors and do the alternative assignment ONLY for them.
+		 * For the moment this locution seems to work correctly.
+		 */
+		if (ATTRIB(dfcol) == R_NilValue ||
+			TYPEOF(CAR(ATTRIB(dfcol))) != STRSXP)
 			PROTECT(obj = AS_CHARACTER(dfcol));
 		else
 			PROTECT(obj = AS_CHARACTER(CAR(ATTRIB(dfcol))));
