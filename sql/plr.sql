@@ -416,7 +416,7 @@ $BODY$
 $BODY$
 LANGUAGE plr WINDOW;
 
-SELECT *, r_regr_slope(eps, lag_eps) OVER w AS slope_R
+SELECT *, round((r_regr_slope(eps, lag_eps) OVER w)::numeric,6) AS slope_R
 FROM (SELECT firm, fyear, eps,
   lag(eps) OVER (ORDER BY firm, fyear) AS lag_eps
 FROM test_data) AS a
