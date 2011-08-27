@@ -1595,7 +1595,7 @@ plr_convertargs(plr_function *function, Datum *arg, bool *argnull, FunctionCallI
 	{
 		WindowObject	winobj = PG_WINDOW_OBJECT();
 		int64			totalrows = WinGetPartitionRowCount(winobj);
-		int				numels;
+		int				numels = 0;
 
 		for (i = 0; i < function->nargs; i++)
 		{

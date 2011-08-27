@@ -1549,7 +1549,7 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 		 typbyval &&
 		 !has_na)
 	{
-		int32		nbytes;
+		int32		nbytes = 0;
 		int32		dataoffset;
 
 		if (TYPEOF(rval) == INTSXP)

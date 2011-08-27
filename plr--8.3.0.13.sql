@@ -1,6 +1,4 @@
--- keep this in sync with the plr--X.Y.Z.N.sql extension install file
-
-SET autocommit TO 'on';
+-- keep this in sync with the plr.sql.in legacy install file
 
 CREATE FUNCTION plr_call_handler()
 RETURNS LANGUAGE_HANDLER

@@ -16,16 +16,17 @@ endif
 
 ifneq (,${R_HOME})
 
-MODULE_big	:= plr
+EXTENSION	= plr
+MODULE_big	= plr
 PG_CPPFLAGS	+= -I$(r_includespec)
 SRCS		+= plr.c pg_conversion.c pg_backend_support.c pg_userfuncs.c pg_rsupport.c
 OBJS		:= $(SRCS:.c=.o)
 SHLIB_LINK	+= -L$(r_libdir1x) -L$(r_libdir2x) -lR
-
-DATA_built	:= plr.sql 
-DOCS		:= README.plr
-REGRESS		:= plr
-EXTRA_CLEAN	:= doc/HTML.index
+DATA_built	= plr.sql
+DATA		= plr--8.3.0.13.sql plr--unpackaged--8.3.0.13.sql
+DOCS		= README.plr
+REGRESS		= plr
+EXTRA_CLEAN	= doc/html/* doc/plr-US.aux doc/plr-*.log doc/plr-*.out doc/plr-*.pdf doc/plr-*.tex-pdf
 
 ifdef USE_PGXS
 ifndef PG_CONFIG
