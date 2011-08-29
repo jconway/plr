@@ -100,6 +100,23 @@ CREATE LANGUAGE plr HANDLER plr_call_handler;
    </programlisting>
   </para>
 
+  <para>
+   As of PostgreSQL 9.1 you can use the new
+   <literal>CREATE EXTENSION</literal> command:
+
+   <programlisting>
+    CREATE EXTENSION plr;
+   </programlisting>
+
+   This is not only simple, it has the added advantage of tracking
+   all PL/R installed objects as dependent on the extension, and
+   therefore they can be removed just as easily if desired:
+
+   <programlisting>
+    DROP EXTENSION plr;
+   </programlisting>
+  </para>
+
   <tip>
    <para>
     If a language is installed into <literal>template1</literal>, all
@@ -1445,6 +1462,33 @@ WINDOW w AS (ORDER BY firm, fyear ROWS 8 PRECEDING);
      within the same <literal>PARTITION</>. In this case since no
      <literal>PARTITION</> is explicitly defined, the <literal>PARTITION</>
      is the entire set of rows returned from the inner sub-select.
+    </para>
+
+    <para>
+     Another interesting example follows. The idea of
+     <quote>Winsorizing</quote> is to return either the original value
+     or, if that value is outside certain bounds, a trimmed value. So for
+     example winsor(eps, 0.1) would return the value at the 10th percentile
+     for values of eps less that that, the value of the 90th percentile for
+     eps greater than that value, and the unmodified value of eps otherwise.
+
+     <programlisting>
+CREATE OR REPLACE FUNCTION winsorize(float8, float8)
+RETURNS float8 AS
+$BODY$
+  library(psych)
+  return(winsor(as.vector(farg1), arg2)[prownum])
+$BODY$ LANGUAGE plr VOLATILE WINDOW;
+
+SELECT fyear, eps, 
+  winsorize(eps, 0.1) OVER (PARTITION BY fyear) AS w_eps
+FROM test_data ORDER BY fyear, eps;
+     </programlisting>
+    </para>
+
+    <para>
+     In this example, use of the variable <literal>prownum</>
+     is illustrated.
     </para>
 
  </chapter>
