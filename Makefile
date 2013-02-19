@@ -4,13 +4,13 @@ ifdef R_HOME
 r_libdir1x = ${R_HOME}/bin
 r_libdir2x = ${R_HOME}/lib
 # location of R includes
-r_includespec = ${R_HOME}/include
+r_includespec = -I${R_HOME}/include
 rhomedef = ${R_HOME}
 else
 R_HOME := $(shell pkg-config --variable=rhome libR)
 r_libdir1x := $(shell pkg-config --variable=rlibdir libR)
 r_libdir2x := $(shell pkg-config --variable=rlibdir libR)
-r_includespec := $(shell pkg-config --variable=rincludedir libR)
+r_includespec := $(shell pkg-config --cflags-only-I libR)
 rhomedef := $(shell pkg-config --variable=rhome libR)
 endif
 
@@ -18,7 +18,7 @@ ifneq (,${R_HOME})
 
 EXTENSION	= plr
 MODULE_big	= plr
-PG_CPPFLAGS	+= -I$(r_includespec)
+PG_CPPFLAGS	+= $(r_includespec)
 SRCS		+= plr.c pg_conversion.c pg_backend_support.c pg_userfuncs.c pg_rsupport.c
 OBJS		:= $(SRCS:.c=.o)
 SHLIB_LINK	+= -L$(r_libdir1x) -L$(r_libdir2x) -lR
