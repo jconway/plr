@@ -1,6 +1,6 @@
 Summary:	A loadable procedural language that enables you to write PostgreSQL functions and triggers in the R programming language.
 Name:		plr
-Version:	8.3.0.11
+Version:	8.3.0.14
 Release:	1%{?dist}
 License:	BSD
 Group:		Applications/Databases
@@ -46,6 +46,9 @@ rm -rf %{buildroot}
 
 %files
 %defattr(644,root,root,755)
-%doc %{_docdir}/pgsql/contrib/README.plr
-%{_datadir}/pgsql/contrib/plr.sql
-%{_libdir}/pgsql/%{name}.so*
+%doc %{_docdir}/README.plr
+%{_datadir}/extension/plr.sql
+%{_datadir}/extension/plr.control
+%{_datadir}/extension/plr--8.3.0.13.sql
+%{_datadir}/extension/plr--unpackaged--8.3.0.13.sql
+%{_libdir}/%{name}.so*

@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2010 by Joseph E. Conway
+ * Copyright (c) 2003-2013 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -31,7 +31,6 @@
  * plr.c - Language handler and support functions
  */
 #include "plr.h"
-#include "libpq/pqsignal.h"
 
 PG_MODULE_MAGIC;
 
@@ -48,6 +47,8 @@ static bool	plr_be_init_done = false;
 
 /* namespace OID for the PL/R language handler function */
 static Oid plr_nspOid = InvalidOid;
+
+int R_SignalHandlers = 1;  /* Exposed in R_interface.h */
 
 /*
  * defines
@@ -369,6 +370,11 @@ plr_init(void)
 	atexit(plr_atexit);
 
 	/*
+	 * Stop R using its own signal handlers
+	 */
+	R_SignalHandlers = 0;
+
+	/*
 	 * When initialization fails, R currently exits. Check the return
 	 * value anyway in case this ever gets fixed
 	 */
@@ -392,10 +398,6 @@ plr_init(void)
 	R_Interactive = false;
 #endif
 
-	/*
-	 * R seems to try to steal SIGINT in recent releases, so steal it back
-	 */
-	pqsignal(SIGINT, StatementCancelHandler);		/* cancel current query */
 
 	plr_pm_init_done = true;
 }

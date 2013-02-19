@@ -2,7 +2,7 @@
  * PL/R - PostgreSQL support for R as a
  *	      procedural language (PL)
  *
- * Copyright (c) 2003-2010 by Joseph E. Conway
+ * Copyright (c) 2003-2013 by Joseph E. Conway
  * ALL RIGHTS RESERVED
  * 
  * Joe Conway <mail@joeconway.com>
@@ -33,7 +33,7 @@
 #ifndef PLR_H
 #define PLR_H
 
-#define PLR_VERSION		"08.03.00.13"
+#define PLR_VERSION		"08.03.00.14"
 
 #include "postgres.h"
 
@@ -103,6 +103,8 @@
 #endif
 #if !defined(WIN32) && !defined(WIN64)
 #include "Rinterface.h"
+#else
+extern int R_SignalHandlers;
 #endif
 #include "Rinternals.h"
 #include "Rdefines.h"
