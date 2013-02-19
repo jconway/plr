@@ -49,6 +49,6 @@ rm -rf %{buildroot}
 %doc %{_docdir}/README.plr
 %{_datadir}/extension/plr.sql
 %{_datadir}/extension/plr.control
-%{_datadir}/extension/plr--8.3.0.13.sql
-%{_datadir}/extension/plr--unpackaged--8.3.0.13.sql
+%{_datadir}/extension/plr--8.3.0.14.sql
+%{_datadir}/extension/plr--unpackaged--8.3.0.14.sql
 %{_libdir}/%{name}.so*
