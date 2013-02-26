@@ -47,8 +47,8 @@ rm -rf %{buildroot}
 %files
 %defattr(644,root,root,755)
 %doc %{_docdir}/README.plr
-%{_datadir}/extension/plr.sql
-%{_datadir}/extension/plr.control
-%{_datadir}/extension/plr--8.3.0.14.sql
-%{_datadir}/extension/plr--unpackaged--8.3.0.14.sql
-%{_libdir}/%{name}.so*
+%{_datadir}/pgsql/extension/plr.sql
+%{_datadir}/pgsql/extension/plr.control
+%{_datadir}/pgsql/extension/plr--8.3.0.14.sql
+%{_datadir}/pgsql/extension/plr--unpackaged--8.3.0.14.sql
+%{_libdir}/pgsql/plr.so*
