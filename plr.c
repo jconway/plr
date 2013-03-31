@@ -177,10 +177,13 @@ static void plr_error_callback(void *arg);
 static Oid getNamespaceOidFromFunctionOid(Oid fnOid);
 static bool haveModulesTable(Oid nspOid);
 static char *getModulesSql(Oid nspOid);
-static char **fetchArgNames(HeapTuple procTup, int nargs);
 #ifdef HAVE_WINDOW_FUNCTIONS
 static void WinGetFrameData(WindowObject winobj, int argno, Datum *dvalues, bool *isnull, int *numels, bool *has_nulls);
 #endif
+static void plr_resolve_polymorphic_argtypes(int numargs,
+											 Oid *argtypes, char *argmodes,
+											 Node *call_expr, bool forValidator,
+											 const char *proname);
 
 /*
  * plr_call_handler -	This is the only visible function
@@ -1136,11 +1139,31 @@ do_compile(FunctionCallInfo fcinfo,
 	if (!is_trigger)
 	{
 		int		i;
-		GET_ARG_NAMES;
+		bool		forValidator = false;
+		int			numargs;
+		Oid		   *argtypes;
+		char	  **argnames;
+		char	   *argmodes;
+
+		numargs = get_func_arg_info(procTup,
+									&argtypes, &argnames, &argmodes);
+
+		plr_resolve_polymorphic_argtypes(numargs, argtypes, argmodes,
+											 fcinfo->flinfo->fn_expr,
+											 forValidator,
+											 function->proname);
+
 
 		function->nargs = procStruct->pronargs;
 		for (i = 0; i < function->nargs; i++)
 		{
+			char		argmode = argmodes ? argmodes[i] : PROARGMODE_IN;
+
+			if (argmode != PROARGMODE_IN &&
+				argmode != PROARGMODE_INOUT &&
+				argmode != PROARGMODE_VARIADIC)
+				continue;
+
 			/*
 			 * Since we already did the replacement of polymorphic
 			 * argument types by actual argument types while computing
@@ -1654,45 +1677,6 @@ plr_error_callback(void *arg)
 }
 
 /*
- * Fetch the argument names, if any, from the proargnames field of the
- * pg_proc tuple.  Results are palloc'd.
- *
- * Borrowed from src/pl/plpgsql/src/pl_comp.c
- */
-static char **
-fetchArgNames(HeapTuple procTup, int nargs)
-{
-	Datum		argnamesDatum;
-	bool		isNull;
-	Datum	   *elems;
-	int			nelems;
-	char	  **result;
-	int			i;
-
-	if (nargs == 0)
-		return NULL;
-
-	argnamesDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proargnames,
-									&isNull);
-	if (isNull)
-		return NULL;
-
-	deconstruct_array(DatumGetArrayTypeP(argnamesDatum),
-					  TEXTOID, -1, false, 'i',
-					  &elems, NULL, &nelems);
-
-	if (nelems != nargs)		/* should not happen */
-		elog(ERROR, "proargnames must have the same number of elements as the function has arguments");
-
-	result = (char **) palloc(sizeof(char *) * nargs);
-
-	for (i=0; i < nargs; i++)
-		result[i] = DatumGetCString(DirectFunctionCall1(textout, elems[i]));
-
-	return result;
-}
-
-/*
  * getNamespaceOidFromFunctionOid - Returns the OID of the namespace for the
  * language handler function for the postgresql function with the OID equal
  * to the input argument.
@@ -1854,3 +1838,54 @@ WinGetFrameData(WindowObject winobj, int argno, Datum *dvalues, bool *isnulls, i
 }
 #endif
 
+/*
+ * swiped out of plpgsql pl_comp.c
+ *
+ * This is the same as the standard resolve_polymorphic_argtypes() function,
+ * but with a special case for validation: assume that polymorphic arguments
+ * are integer, integer-array or integer-range.  Also, we go ahead and report
+ * the error if we can't resolve the types.
+ */
+static void
+plr_resolve_polymorphic_argtypes(int numargs,
+								 Oid *argtypes, char *argmodes,
+								 Node *call_expr, bool forValidator,
+								 const char *proname)
+{
+	int			i;
+
+	if (!forValidator)
+	{
+		/* normal case, pass to standard routine */
+		if (!resolve_polymorphic_argtypes(numargs, argtypes, argmodes,
+										  call_expr))
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("could not determine actual argument "
+							"type for polymorphic function \"%s\"",
+							proname)));
+	}
+	else
+	{
+		/* special validation case */
+		for (i = 0; i < numargs; i++)
+		{
+			switch (argtypes[i])
+			{
+				case ANYELEMENTOID:
+				case ANYNONARRAYOID:
+				case ANYENUMOID:		/* XXX dubious */
+					argtypes[i] = INT4OID;
+					break;
+				case ANYARRAYOID:
+					argtypes[i] = INT4ARRAYOID;
+					break;
+				case ANYRANGEOID:
+					argtypes[i] = INT4RANGEOID;
+					break;
+				default:
+					break;
+			}
+		}
+	}
+}

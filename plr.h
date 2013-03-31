@@ -44,6 +44,11 @@
 #include "windowapi.h"
 #endif
 #include "access/heapam.h"
+#if PG_VERSION_NUM >= 90300
+#include "access/htup_details.h"
+#else
+#include "access/htup.h"
+#endif
 #include "catalog/catversion.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_namespace.h"
