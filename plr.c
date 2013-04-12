@@ -1880,9 +1880,11 @@ plr_resolve_polymorphic_argtypes(int numargs,
 				case ANYARRAYOID:
 					argtypes[i] = INT4ARRAYOID;
 					break;
+#ifdef ANYRANGEOID
 				case ANYRANGEOID:
 					argtypes[i] = INT4RANGEOID;
 					break;
+#endif
 				default:
 					break;
 			}
