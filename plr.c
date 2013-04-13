@@ -301,7 +301,7 @@ PLR_CLEANUP
 		sprintf(buf, "rm -rf \"%s\"", tmpdir);
 
 		/* ignoring return value */
-		system(buf);
+		(void) system(buf);
 	}
 }
 
@@ -1880,9 +1880,11 @@ plr_resolve_polymorphic_argtypes(int numargs,
 				case ANYARRAYOID:
 					argtypes[i] = INT4ARRAYOID;
 					break;
+#ifdef ANYRANGEOID
 				case ANYRANGEOID:
 					argtypes[i] = INT4RANGEOID;
 					break;
+#endif
 				default:
 					break;
 			}
