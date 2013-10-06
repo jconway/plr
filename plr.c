@@ -1417,10 +1417,9 @@ plr_parse_func_body(const char *body)
     SEXP	tmp;
 	int		status;
 
-	PROTECT(rbody = NEW_CHARACTER(1));
-	SET_STRING_ELT(rbody, 0, COPY_TO_USER_STRING(body));
+	PROTECT(rbody = mkString(body));
+	PROTECT(tmp = R_PARSEVECTOR(rbody, -1, &status));
 
-	tmp = PROTECT(R_PARSEVECTOR(rbody, -1, &status));
 	if (tmp != R_NilValue)
 		PROTECT(fun = VECTOR_ELT(tmp, 0));
 	else

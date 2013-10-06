@@ -64,6 +64,7 @@ static Tuplestorestate *get_generic_tuplestore(SEXP rval,
 											 AttInMetadata *attinmeta,
 											 MemoryContext per_query_ctx,
 											 bool retset);
+static SEXP coerce_to_char(SEXP rval);
 
 extern char *last_R_error_msg;
 
@@ -833,7 +834,7 @@ get_trigger_tuple(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bo
 		{
 			SEXP	obj;
 
-			PROTECT(obj = AS_CHARACTER(dfcol));
+			PROTECT(obj = coerce_to_char(dfcol));
 			SET_VECTOR_ELT(result, j, obj);
 			UNPROTECT(1);
 		}
@@ -845,7 +846,7 @@ get_trigger_tuple(SEXP rval, plr_function *function, FunctionCallInfo fcinfo, bo
 			{
 				if(TAG(t) == R_LevelsSymbol)
 				{
-					PROTECT(SETCAR(t, AS_CHARACTER(CAR(t))));
+					PROTECT(SETCAR(t, coerce_to_char(CAR(t))));
 					UNPROTECT(1);
 					break;
 				}
@@ -1013,7 +1014,7 @@ get_scalar_datum(SEXP rval, Oid result_typid, FmgrInfo result_in_func, bool *isn
 	 */
 	if (result_typid != BYTEAOID)
 	{
-		PROTECT(obj = AS_CHARACTER(rval));
+		PROTECT(obj = coerce_to_char(rval));
 		if (STRING_ELT(obj, 0) == NA_STRING)
 		{
 			UNPROTECT(1);
@@ -1185,9 +1186,9 @@ get_frame_array_datum(SEXP rval, plr_function *function, int col, bool *isnull)
 		 */
 		if (ATTRIB(dfcol) == R_NilValue ||
 			TYPEOF(CAR(ATTRIB(dfcol))) != STRSXP)
-			PROTECT(obj = AS_CHARACTER(dfcol));
+			PROTECT(obj = coerce_to_char(dfcol));
 		else
-			PROTECT(obj = AS_CHARACTER(CAR(ATTRIB(dfcol))));
+			PROTECT(obj = coerce_to_char(CAR(ATTRIB(dfcol))));
 
 		if (j == 0)
 		{
@@ -1291,7 +1292,7 @@ get_simple_array_datum(SEXP rval, Oid typelem, bool *isnull)
 
 	dvalues = (Datum *) palloc(nitems * sizeof(Datum));
 	nulls = (bool *) palloc(nitems * sizeof(bool));
-	PROTECT(obj =  AS_CHARACTER(rval));
+	PROTECT(obj =  coerce_to_char(rval));
 
 	for (i = 0; i < nitems; i++)
 	{
@@ -1410,7 +1411,7 @@ get_md_array_datum(SEXP rval, int ndims, plr_function *function, int col, bool *
 	nitems = nr * nc * nz;
 	dvalues = (Datum *) palloc(nitems * sizeof(Datum));
 	nulls = (bool *) palloc(nitems * sizeof(bool));
-	PROTECT(obj =  AS_CHARACTER(rval));
+	PROTECT(obj =  coerce_to_char(rval));
 
 	for (i = 0; i < nr; i++)
 	{
@@ -1585,7 +1586,7 @@ get_generic_array_datum(SEXP rval, plr_function *function, int col, bool *isnull
 		/* original code */
 		dvalues = (Datum *) palloc(objlen * sizeof(Datum));
 		nulls = (bool *) palloc(objlen * sizeof(bool));
-		PROTECT(obj =  AS_CHARACTER(rval));
+		PROTECT(obj =  coerce_to_char(rval));
 
 		/* Loop is needed here as result value might be of length > 1 */
 		for(i = 0; i < objlen; i++)
@@ -1688,7 +1689,7 @@ get_frame_tuplestore(SEXP rval,
 		{
 			SEXP	obj;
 
-			PROTECT(obj = AS_CHARACTER(dfcol));
+			PROTECT(obj = coerce_to_char(dfcol));
 			SET_VECTOR_ELT(result, j, obj);
 			UNPROTECT(1);
 		}
@@ -1703,7 +1704,7 @@ get_frame_tuplestore(SEXP rval,
 				SEXP	objcell;
 
 				PROTECT(dfcolcell = VECTOR_ELT(dfcol, i));
-				PROTECT(objcell = AS_CHARACTER(dfcolcell));
+				PROTECT(objcell = coerce_to_char(dfcolcell));
 				SET_VECTOR_ELT(obj, i, objcell);
 				UNPROTECT(2);
 			}
@@ -1719,7 +1720,7 @@ get_frame_tuplestore(SEXP rval,
 			{
 				if(TAG(t) == R_LevelsSymbol)
 				{
-					PROTECT(SETCAR(t, AS_CHARACTER(CAR(t))));
+					PROTECT(SETCAR(t, coerce_to_char(CAR(t))));
 					UNPROTECT(1);
 					break;
 				}
@@ -1879,7 +1880,7 @@ get_matrix_tuplestore(SEXP rval,
 
 	values = (char **) palloc(nc * sizeof(char *));
 
-	PROTECT(obj =  AS_CHARACTER(rval));
+	PROTECT(obj =  coerce_to_char(rval));
 	for(i = 0; i < nr; i++)
 	{
 		for (j = 0; j < nc; j++)
@@ -1945,8 +1946,7 @@ get_generic_tuplestore(SEXP rval,
 	MemoryContextSwitchTo(oldcontext);
 
 	values = (char **) palloc(nc * sizeof(char *));
-
-	PROTECT(obj =  AS_CHARACTER(rval));
+	PROTECT(obj = coerce_to_char(rval));
 
 	for(i = 0; i < nr; i++)
 	{
@@ -1974,4 +1974,36 @@ get_generic_tuplestore(SEXP rval,
 	MemoryContextSwitchTo(oldcontext);
 
 	return tupstore;
+}
+
+static SEXP
+coerce_to_char(SEXP rval)
+{
+	SEXP	obj;
+
+	switch (TYPEOF(rval))
+	{
+		case LISTSXP:
+		case NILSXP:
+		case SYMSXP:
+		case VECSXP:
+		case EXPRSXP:
+		case LGLSXP:
+		case INTSXP:
+		case REALSXP:
+		case CPLXSXP:
+		case STRSXP:
+		case RAWSXP:
+			PROTECT(obj = AS_CHARACTER(rval));
+			break;
+		default:
+			ereport(ERROR,
+			(errcode(ERRCODE_DATA_EXCEPTION),
+				errmsg("data type coercion error"),
+				errdetail("R object is not an expected " \
+						  "data type; examine your R code")));
+	}
+	UNPROTECT(1);
+
+	return obj;
 }
