@@ -292,6 +292,7 @@ PLR_CLEANUP
 
 	if(tmpdir)
 	{
+		int		rv;
 		/*
 		 * length needed = 'rm -rf ""' == 9
 		 * plus 1 for NULL terminator
@@ -301,7 +302,9 @@ PLR_CLEANUP
 		sprintf(buf, "rm -rf \"%s\"", tmpdir);
 
 		/* ignoring return value */
-		(void) system(buf);
+		rv = system(buf);
+		if (rv != 0)
+			; /* do nothing */
 	}
 }
 

@@ -1979,7 +1979,7 @@ get_generic_tuplestore(SEXP rval,
 static SEXP
 coerce_to_char(SEXP rval)
 {
-	SEXP	obj;
+	SEXP	obj = NULL;
 
 	switch (TYPEOF(rval))
 	{
