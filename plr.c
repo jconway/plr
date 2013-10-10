@@ -1052,7 +1052,7 @@ do_compile(FunctionCallInfo fcinfo,
 			ReturnSetInfo  *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 			
 			/* check to see if caller supports us returning a tuplestore */
-			if (!rsinfo || !(rsinfo->allowedModes & SFRM_Materialize))
+			if (!rsinfo || !(rsinfo->allowedModes & SFRM_Materialize) || rsinfo->expectedDesc == NULL)
 				ereport(ERROR,
 						(errcode(ERRCODE_SYNTAX_ERROR),
 				 		errmsg("materialize mode required, but it is not "
