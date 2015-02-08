@@ -1,7 +1,5 @@
 -- keep this in sync with the plr--X.Y.Z.N.sql extension install file
 
-SET autocommit TO 'on';
-
 CREATE FUNCTION plr_call_handler()
 RETURNS LANGUAGE_HANDLER
 AS 'MODULE_PATHNAME' LANGUAGE C;
