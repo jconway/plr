@@ -398,7 +398,11 @@ find_in_dynamic_libpath(const char *basename)
 {
 	const char *p;
 	size_t		baselen;
-	char	   *Dynamic_library_path = GetConfigOptionByName("dynamic_library_path", NULL);
+	char	   *Dynamic_library_path = GetConfigOptionByName("dynamic_library_path", NULL
+#if PG_VERSION_NUM >= 90600
+								 , false
+#endif
+		);
 
 	AssertArg(basename != NULL);
 	AssertArg(strchr(basename, '/') == NULL);
