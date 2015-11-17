@@ -44,6 +44,15 @@
  <chapter id="plr-install">
   <title>Installation</title>
   <para>
+  If you are going to compile PostgreSQL from the source, use the follwing commands
+  from the untared and unzipped file downloaded from http://www.postgresql.org/ftp/source/:
+  <programlisting>
+  ./configure --enable-R-shlib  --prefix=/opt/postgres_plr && make && make install
+  </programlisting>
+  </para>
+  
+  
+  <para>
    Place source tar file in <literal>contrib</literal> in the PostgreSQL source
    tree and untar it. The shared object for the R call handler is built and
    installed in the PostgreSQL library directory via the following commands
@@ -53,6 +62,14 @@
     make
     make install
    </programlisting>
+  </para>
+
+  <para>
+  If you want to use git to pull the repository, run the following command before
+  the make command:
+  <programlisting>
+  git clone https://github.com/jconway/plr
+  </programlisting>
   </para>
 
   <para>
