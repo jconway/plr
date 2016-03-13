@@ -26,6 +26,7 @@ cd ../../../contrib/plr
 
 msvc.diff
 
+```diff
 diff -cNr msvc.orig/config.pl msvc/config.pl
 *** msvc.orig/config.pl	1969-12-31 16:00:00.000000000 -0800
 --- msvc/config.pl	2011-08-26 09:24:56.734375000 -0700
@@ -168,6 +169,6 @@ diff -cNr msvc.orig/vcregress.pl msvc/vcregress.pl
 + 	else
 + 	{
 + 		print " $status;
-
+```
 
 
