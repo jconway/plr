@@ -1,14 +1,3 @@
-Decoding completed successfully.
-Decode: summary
-Decode algorithm:	Base64
-Internal algorithm:	decode (base64_decode) {…}
-Input:	Text field
-Text snipet:	SSBzdWNjZXNzZnVsbHkgZGlkIHRoZSBmb2xsb3dpbmcgcmVjZW50bHkgaW4gb3JkZXIgdG8g YnVpbGQgNjQgYml0IFBML1INCm… truncated
-Size:	6,902 bytes
-Decode: data
-Output:	5035 bytes
-Ratio:	0.729 (5,035:6,902)
-
 I successfully did the following recently in order to build 64 bit PL/R
 on Windows 7:
 
@@ -37,6 +26,7 @@ cd ../../../contrib/plr
 
 msvc.diff
 
+```diff
 diff -cNr msvc.orig/config.pl msvc/config.pl
 *** msvc.orig/config.pl	1969-12-31 16:00:00.000000000 -0800
 --- msvc/config.pl	2011-08-26 09:24:56.734375000 -0700
@@ -179,6 +169,6 @@ diff -cNr msvc.orig/vcregress.pl msvc/vcregress.pl
 + 	else
 + 	{
 + 		print " $status;
-
+```
 
 
