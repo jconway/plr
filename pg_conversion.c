@@ -1015,7 +1015,12 @@ get_scalar_datum(SEXP rval, Oid result_typid, FmgrInfo result_in_func, bool *isn
 	if (result_typid != BYTEAOID)
 	{
 		PROTECT(obj = coerce_to_char(rval));
-		if (STRING_ELT(obj, 0) == NA_STRING)
+		/*
+		 * passing a null into something like
+		 * return as.real(NULL) will return numeric(0)
+		 * which has a length of 0
+		 */
+		if ( (isNumeric(rval) && length(rval) == 0) || STRING_ELT(obj, 0) == NA_STRING)
 		{
 			UNPROTECT(1);
 			*isnull = true;

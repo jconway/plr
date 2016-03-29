@@ -33,6 +33,49 @@ create or replace function pg_test_install(text) returns text as 'pg.test.instal
 select pg_test_install('hello world');
 
 --
+-- test simple input/output types
+--
+
+CREATE OR REPLACE FUNCTION rint2(i int2) RETURNS int2 AS $$
+return (as.integer(i))
+$$ LANGUAGE plr;
+select rint2(1::int2);
+select rint2(NULL);
+
+CREATE OR REPLACE FUNCTION rint4(i int4) RETURNS int4 AS $$
+return (as.integer(i))
+$$ LANGUAGE plr;
+select rint4(1::int4);
+select rint4(NULL);
+
+CREATE OR REPLACE FUNCTION rint8(i int8) RETURNS int8 AS $$
+return (as.integer(i))
+$$ LANGUAGE plr;
+select rint8(1::int8);
+select rint8(NULL);
+
+CREATE OR REPLACE FUNCTION rbool(b bool) RETURNS bool AS $$
+return (as.logical(b))
+$$ LANGUAGE plr;
+select rbool('t');
+select rbool('f');
+select rbool(NULL);
+
+
+CREATE OR REPLACE FUNCTION rfloat4(f float4) RETURNS float4 AS $$
+return (as.numeric(f))
+$$ LANGUAGE plr;
+select rfloat4(1::int4);
+select rfloat4(NULL);
+
+CREATE OR REPLACE FUNCTION rfloat8(f float8) RETURNS float8 AS $$
+return (as.numeric(f))
+$$ LANGUAGE plr;
+select rfloat8(1::float8);
+select rfloat8(NULL);
+
+
+--
 -- a variety of plr functions
 --
 create or replace function throw_notice(text) returns text as 'pg.thrownotice(arg1)' language 'plr';
