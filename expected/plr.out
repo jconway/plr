@@ -55,6 +55,105 @@ select pg_test_install('hello world');
 (1 row)
 
 --
+-- test simple input/output types
+--
+CREATE OR REPLACE FUNCTION rint2(i int2) RETURNS int2 AS $$
+return (as.integer(i))
+$$ LANGUAGE plr;
+select rint2(1::int2);
+ rint2 
+-------
+     1
+(1 row)
+
+select rint2(NULL);
+ rint2 
+-------
+      
+(1 row)
+
+CREATE OR REPLACE FUNCTION rint4(i int4) RETURNS int4 AS $$
+return (as.integer(i))
+$$ LANGUAGE plr;
+select rint4(1::int4);
+ rint4 
+-------
+     1
+(1 row)
+
+select rint4(NULL);
+ rint4 
+-------
+      
+(1 row)
+
+CREATE OR REPLACE FUNCTION rint8(i int8) RETURNS int8 AS $$
+return (as.integer(i))
+$$ LANGUAGE plr;
+select rint8(1::int8);
+ rint8 
+-------
+     1
+(1 row)
+
+select rint8(NULL);
+ rint8 
+-------
+      
+(1 row)
+
+CREATE OR REPLACE FUNCTION rbool(b bool) RETURNS bool AS $$
+return (as.logical(b))
+$$ LANGUAGE plr;
+select rbool('t');
+ rbool 
+-------
+ t
+(1 row)
+
+select rbool('f');
+ rbool 
+-------
+ f
+(1 row)
+
+select rbool(NULL);
+ rbool 
+-------
+ 
+(1 row)
+
+CREATE OR REPLACE FUNCTION rfloat4(f float4) RETURNS float4 AS $$
+return (as.numeric(f))
+$$ LANGUAGE plr;
+select rfloat4(1::int4);
+ rfloat4 
+---------
+       1
+(1 row)
+
+select rfloat4(NULL);
+ rfloat4 
+---------
+        
+(1 row)
+
+CREATE OR REPLACE FUNCTION rfloat8(f float8) RETURNS float8 AS $$
+return (as.numeric(f))
+$$ LANGUAGE plr;
+select rfloat8(1::float8);
+ rfloat8 
+---------
+       1
+(1 row)
+
+select rfloat8(NULL);
+ rfloat8 
+---------
+        
+(1 row)
+
+--
 -- a variety of plr functions
 --
 create or replace function throw_notice(text) returns text as 'pg.thrownotice(arg1)' language 'plr';
