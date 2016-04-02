@@ -1,0 +1,12 @@
+os:
+  - linux
+
+language: c
+sudo : false
+
+before_script:
+  - apt-get install R
+
+services:
+  - postgresql
+
