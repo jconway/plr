@@ -178,7 +178,11 @@ plr_SPI_exec(SEXP rsql)
 		case SPI_OK_INSERT:
 		case SPI_OK_DELETE:
 		case SPI_OK_UPDATE:
+#if PG_VERSION_NUM >= 90600
+			snprintf(buf, sizeof(buf), UINT64_FORMAT, SPI_processed);
+#else
 			snprintf(buf, sizeof(buf), "%d", SPI_processed);
+#endif
 			SPI_freetuptable(SPI_tuptable);
 
 			PROTECT(result = NEW_CHARACTER(1));
@@ -536,7 +540,11 @@ plr_SPI_execp(SEXP rsaved_plan, SEXP rargvalues)
 		case SPI_OK_INSERT:
 		case SPI_OK_DELETE:
 		case SPI_OK_UPDATE:
+#if PG_VERSION_NUM >= 90600
+			snprintf(buf, sizeof(buf), UINT64_FORMAT, SPI_processed);
+#else
 			snprintf(buf, sizeof(buf), "%d", SPI_processed);
+#endif
 			SPI_freetuptable(SPI_tuptable);
 
 			PROTECT(result = NEW_CHARACTER(1));
