@@ -62,6 +62,14 @@
     make
     make install
    </programlisting>
+   
+   You may explicitly include the path of pg_config to <literal>PATH</literal>, such as
+   <programlisting>
+    cd plr
+    PATH=/usr/pgsql-9.4/bin/:$PATH; USE_PGXS=1 make
+    echo 'PATH=/usr/pgsql-9.4/bin/:$PATH; USE_PGXS=1 make install' | sudo sh
+   </programlisting>
+   
   </para>
 
   <para>
